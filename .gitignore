@@ -1,0 +1,29 @@
+# Secrets
+.env
+
+# Data caches (rebuilt from APIs)
+data/raw/*
+data/cache/*
+data/processed/*
+!data/raw/.gitkeep
+!data/cache/.gitkeep
+!data/processed/.gitkeep
+
+# Local prediction history DB (machine-specific)
+data/history.sqlite
+
+# Logs
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store

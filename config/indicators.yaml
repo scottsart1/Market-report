@@ -1,0 +1,732 @@
+# Indicator universe for the U.S. recession probability model.
+#
+# Fields per indicator:
+#   id:            series identifier (FRED series id, or internal id for derived series)
+#   name:          human-readable name
+#   category:      rates | policy | credit | markets | labor | real_activity | housing |
+#                  consumer | inflation | alt_hf
+#   source:        fred | derived
+#   frequency:     d (business daily) | w (weekly) | m (monthly)
+#   publication_lag_days: calendar days AFTER the period END until the value is
+#                  publicly known. Used to build the point-in-time panel whenever
+#                  true ALFRED vintage (first-release) dates are unavailable.
+#   vintage:       true if ALFRED first-release data should be used for training
+#                  history (revision-prone series). false for market prices that
+#                  are never materially revised.
+#   tier:          1 = core (long history, high reliability), 2 = supplementary
+#                  (shorter history or larger lag; model tolerates their absence).
+#   license:       public = public domain / US-government work, fred_full = full
+#                  history redistributable via FRED, restricted = licensing limits
+#                  history without an API key (auto-substituted by proxies).
+#   enabled:       optional, default true.
+#   inputs/derive: for derived series, the recipe and its parent series.
+#   transforms:    list of {t: transform_code, risk: +1|-1, desc: plain-English}.
+#                  risk = +1 means HIGHER transformed value -> HIGHER recession risk.
+#                  risk is used only for phrasing and category stress scores,
+#                  never as a model input or constraint.
+#
+# Transform codes are implemented in src/recession/features.py. All transforms
+# use trailing data only.
+
+indicators:
+
+  # ---------------------------------------------------------------- rates ----
+  - id: DGS10
+    name: 10-Year Treasury Yield
+    category: rates
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg3m, risk: -1, desc: "10-year Treasury yield 3-month change"}
+
+  - id: DGS2
+    name: 2-Year Treasury Yield
+    category: rates
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: DGS5
+    name: 5-Year Treasury Yield
+    category: rates
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: DGS1
+    name: 1-Year Treasury Yield
+    category: rates
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: DTB3
+    name: 3-Month Treasury Bill (secondary market)
+    category: rates
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: SPREAD_10Y3M
+    name: 10Y-3M Treasury Spread
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DGS10, DTB3]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level,      risk: -1, desc: "10Y-3M Treasury spread (level)"}
+      - {t: chg3m,      risk: -1, desc: "10Y-3M spread 3-month change"}
+      - {t: chg12m,     risk: -1, desc: "10Y-3M spread 12-month change"}
+      - {t: inv_share1y, risk: +1, desc: "Share of past year with inverted 10Y-3M curve"}
+      - {t: resteep,    risk: +1, desc: "Curve re-steepening after inversion"}
+      - {t: since_inv,  risk: -1, desc: "Time elapsed since last 10Y-3M inversion"}
+
+  - id: SPREAD_10Y2Y
+    name: 10Y-2Y Treasury Spread
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DGS10, DGS2]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "10Y-2Y Treasury spread (level)"}
+      - {t: chg3m, risk: -1, desc: "10Y-2Y spread 3-month change"}
+
+  - id: CURVE_CURV
+    name: Yield-Curve Curvature (5Y vs 1Y/10Y)
+    category: rates
+    source: derived
+    derive: curvature
+    inputs: [DGS1, DGS5, DGS10]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 2
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "Yield-curve curvature (belly vs wings)"}
+
+  # --------------------------------------------------------------- policy ----
+  - id: FEDFUNDS
+    name: Effective Federal Funds Rate
+    category: policy
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg6m,  risk: +1, desc: "Fed funds rate 6-month change (tightening pace)"}
+      - {t: chg12m, risk: +1, desc: "Fed funds rate 12-month cumulative change"}
+
+  - id: REAL_FFR
+    name: Real Federal Funds Rate (vs core CPI)
+    category: policy
+    source: derived
+    derive: real_rate
+    inputs: [FEDFUNDS, CPILFESL]
+    frequency: m
+    publication_lag_days: 15
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level,  risk: +1, desc: "Real policy rate (fed funds minus core CPI inflation)"}
+      - {t: chg12m, risk: +1, desc: "Real policy rate 12-month change"}
+
+  # --------------------------------------------------------------- credit ----
+  - id: BAA
+    name: Moody's Baa Corporate Yield
+    category: credit
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 1
+    license: fred_full
+    transforms: []
+
+  - id: AAA
+    name: Moody's Aaa Corporate Yield
+    category: credit
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 1
+    license: fred_full
+    transforms: []
+
+  - id: BAA10YM
+    name: Baa Corporate minus 10Y Treasury Spread
+    category: credit
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 1
+    license: fred_full
+    transforms:
+      - {t: level, risk: +1, desc: "Baa credit spread over Treasuries (level)"}
+      - {t: z10y,  risk: +1, desc: "Baa credit spread vs 10-year norm (z-score)"}
+      - {t: chg3m, risk: +1, desc: "Baa credit spread 3-month change"}
+      - {t: chg6m, risk: +1, desc: "Baa credit spread 6-month change"}
+
+  - id: BAA_AAA
+    name: Baa-Aaa Quality Spread
+    category: credit
+    source: derived
+    derive: spread
+    inputs: [BAA, AAA]
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 1
+    license: fred_full
+    transforms:
+      - {t: level, risk: +1, desc: "Low-grade vs high-grade corporate quality spread"}
+      - {t: chg3m, risk: +1, desc: "Corporate quality spread 3-month change"}
+
+  - id: NFCI
+    name: Chicago Fed National Financial Conditions Index
+    category: credit
+    source: fred
+    frequency: w
+    publication_lag_days: 5
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: +1, desc: "Financial conditions (NFCI level)"}
+      - {t: chg3m, risk: +1, desc: "Financial conditions 3-month tightening"}
+
+  - id: CPFF
+    name: 3-Month Commercial Paper minus Fed Funds
+    category: credit
+    source: fred
+    frequency: d
+    publication_lag_days: 2
+    vintage: false
+    tier: 2
+    license: public
+    transforms:
+      - {t: avg1m, risk: +1, desc: "Commercial-paper funding stress (1-month average)"}
+
+  - id: MORTGAGE30US
+    name: 30-Year Fixed Mortgage Rate
+    category: housing
+    source: fred
+    frequency: w
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: fred_full
+    transforms: []
+
+  - id: MTG_SPREAD
+    name: Mortgage Spread (30Y mortgage minus 10Y Treasury)
+    category: credit
+    source: derived
+    derive: spread
+    inputs: [MORTGAGE30US, DGS10]
+    frequency: w
+    publication_lag_days: 2
+    vintage: false
+    tier: 2
+    license: fred_full
+    transforms:
+      - {t: level, risk: +1, desc: "Mortgage spread over Treasuries"}
+      - {t: chg6m, risk: +1, desc: "Mortgage spread 6-month change"}
+
+  # Optional ICE BofA OAS series. Restricted license: without an API key FRED's
+  # public CSV serves only ~10 years, which is useless for recession backtests,
+  # and history is too short (1996+) to cover most recessions anyway. The
+  # public-domain proxies above (BAA10YM, BAA_AAA, NFCI) carry the credit
+  # signal. Enabled as tier-2 extras only when history is retrievable.
+  - id: BAMLH0A0HYM2
+    name: ICE BofA High Yield OAS
+    category: credit
+    source: fred
+    frequency: d
+    publication_lag_days: 2
+    vintage: false
+    tier: 2
+    license: restricted
+    min_history_start: "2000-01-01"
+    transforms:
+      - {t: level, risk: +1, desc: "High-yield credit spread (OAS)"}
+      - {t: chg3m, risk: +1, desc: "High-yield spread 3-month change"}
+
+  # -------------------------------------------------------------- markets ----
+  - id: NASDAQCOM
+    name: U.S. Equities (Nasdaq Composite, long-history proxy)
+    category: markets
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: fred_full
+    transforms:
+      - {t: ret1m,  risk: -1, desc: "Equity 1-month return"}
+      - {t: ret3m,  risk: -1, desc: "Equity 3-month return"}
+      - {t: ret6m,  risk: -1, desc: "Equity 6-month return"}
+      - {t: dd1y,   risk: -1, desc: "Equity drawdown from 1-year peak"}
+      - {t: vol3m,  risk: +1, desc: "Equity realized volatility (3-month)"}
+      - {t: dma200, risk: -1, desc: "Equity price vs 200-day moving average"}
+
+  - id: VIXCLS
+    name: CBOE Volatility Index (VIX)
+    category: markets
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 2
+    license: fred_full
+    transforms:
+      - {t: avg1m, risk: +1, desc: "Implied volatility (VIX, 1-month average)"}
+
+  # ---------------------------------------------------------------- labor ----
+  - id: ICSA
+    name: Initial Jobless Claims
+    category: labor
+    source: fred
+    frequency: w
+    publication_lag_days: 5
+    vintage: true
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: ICSA_4WK
+    name: Initial Claims (4-week average)
+    category: labor
+    source: derived
+    derive: avg4w
+    inputs: [ICSA]
+    frequency: w
+    publication_lag_days: 5
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: pct3m,     risk: +1, desc: "Initial jobless claims 3-month change"}
+      - {t: pct6m,     risk: +1, desc: "Initial jobless claims 6-month change"}
+      - {t: pctile3y,  risk: +1, desc: "Initial claims vs past 3 years (percentile)"}
+
+  - id: CCSA
+    name: Continuing Jobless Claims
+    category: labor
+    source: fred
+    frequency: w
+    publication_lag_days: 12
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: pct3m, risk: +1, desc: "Continuing claims 3-month change"}
+      - {t: pct6m, risk: +1, desc: "Continuing claims 6-month change"}
+
+  - id: UNRATE
+    name: Unemployment Rate
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg3m,  risk: +1, desc: "Unemployment rate 3-month change"}
+      - {t: chg12m, risk: +1, desc: "Unemployment rate 12-month change"}
+
+  - id: SAHM_RT
+    name: Real-Time Sahm Rule Gap
+    category: labor
+    source: derived
+    derive: sahm
+    inputs: [UNRATE]
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: +1, desc: "Sahm-rule unemployment gap"}
+
+  - id: PAYEMS
+    name: Nonfarm Payrolls
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: ann3m,   risk: -1, desc: "Payroll growth, 3-month annualized"}
+      - {t: ann6m,   risk: -1, desc: "Payroll growth, 6-month annualized"}
+      - {t: accel3m, risk: -1, desc: "Payroll growth acceleration"}
+
+  - id: TEMPHELPS
+    name: Temporary-Help Employment
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy,   risk: -1, desc: "Temporary-help employment, year over year"}
+      - {t: ann6m, risk: -1, desc: "Temporary-help employment 6-month trend"}
+
+  - id: AWHMAN
+    name: Manufacturing Average Weekly Hours
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg6m,  risk: -1, desc: "Manufacturing weekly hours 6-month change"}
+      - {t: chg12m, risk: -1, desc: "Manufacturing weekly hours 12-month change"}
+
+  - id: EMRATIO
+    name: Employment-Population Ratio
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: chg6m, risk: -1, desc: "Employment-population ratio 6-month change"}
+
+  - id: JTSJOL
+    name: Job Openings (JOLTS)
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 40
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: -1, desc: "Job openings, year over year"}
+
+  # -------------------------------------------------------- real activity ----
+  - id: INDPRO
+    name: Industrial Production
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 16
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Industrial production 3-month trend"}
+      - {t: ann6m, risk: -1, desc: "Industrial production 6-month trend"}
+      - {t: yoy,   risk: -1, desc: "Industrial production, year over year"}
+
+  - id: CUMFNS
+    name: Manufacturing Capacity Utilization
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 16
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg6m,   risk: -1, desc: "Capacity utilization 6-month change"}
+      - {t: dmax2y,  risk: -1, desc: "Capacity utilization vs 2-year high"}
+
+  - id: W875RX1
+    name: Real Personal Income ex Transfers
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 28
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: ann6m, risk: -1, desc: "Real income ex-transfers 6-month trend"}
+      - {t: yoy,   risk: -1, desc: "Real income ex-transfers, year over year"}
+
+  - id: CFNAI
+    name: Chicago Fed National Activity Index
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 24
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "National activity index (CFNAI)"}
+      - {t: avg3m, risk: -1, desc: "National activity index, 3-month average"}
+
+  - id: NEWORDER
+    name: Core Capital Goods Orders
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 26
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy,   risk: -1, desc: "Core capital-goods orders, year over year"}
+      - {t: ann6m, risk: -1, desc: "Core capital-goods orders 6-month trend"}
+
+  - id: RSXFS
+    name: Retail Sales ex Food Services
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 15
+    vintage: true
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: REAL_RETAIL
+    name: Real Retail Sales
+    category: consumer
+    source: derived
+    derive: deflate
+    inputs: [RSXFS, CPIAUCSL]
+    frequency: m
+    publication_lag_days: 15
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Real retail sales 3-month trend"}
+      - {t: yoy,   risk: -1, desc: "Real retail sales, year over year"}
+
+  # -------------------------------------------------------------- housing ----
+  - id: PERMIT
+    name: Building Permits
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: yoy,    risk: -1, desc: "Building permits, year over year"}
+      - {t: ann6m,  risk: -1, desc: "Building permits 6-month trend"}
+      - {t: dmax2y, risk: -1, desc: "Building permits vs 2-year high"}
+
+  - id: HOUST
+    name: Housing Starts
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: yoy, risk: -1, desc: "Housing starts, year over year"}
+
+  - id: HSN1F
+    name: New Single-Family Home Sales
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 25
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy,    risk: -1, desc: "New home sales, year over year"}
+      - {t: dmax2y, risk: -1, desc: "New home sales vs 2-year high"}
+
+  # ------------------------------------------------------------- consumer ----
+  - id: UMCSENT
+    name: Consumer Sentiment (U. Michigan)
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 2
+    vintage: true
+    tier: 1
+    license: fred_full
+    transforms:
+      - {t: z10y,  risk: -1, desc: "Consumer sentiment vs 10-year norm"}
+      - {t: chg6m, risk: -1, desc: "Consumer sentiment 6-month change"}
+
+  - id: DPCERA3M086SBEA
+    name: Real Personal Consumption Expenditures
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 28
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Real consumer spending 3-month trend"}
+      - {t: ann6m, risk: -1, desc: "Real consumer spending 6-month trend"}
+      - {t: yoy,   risk: -1, desc: "Real consumer spending, year over year"}
+
+  - id: TOTALSA
+    name: Total Vehicle Sales
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy,    risk: -1, desc: "Vehicle sales, year over year"}
+      - {t: dmax2y, risk: -1, desc: "Vehicle sales vs 2-year high"}
+
+  - id: PSAVERT
+    name: Personal Saving Rate
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 28
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: chg12m, risk: +1, desc: "Personal saving rate 12-month change"}
+
+  - id: DSPIC96
+    name: Real Disposable Personal Income
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 28
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: ann6m, risk: -1, desc: "Real disposable income 6-month trend"}
+
+  # ------------------------------------------------------------ inflation ----
+  - id: CPIAUCSL
+    name: Consumer Price Index
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 13
+    vintage: true
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: CPILFESL
+    name: Core CPI
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 13
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: yoy,     risk: +1, desc: "Core CPI inflation, year over year"}
+      - {t: infl_accel, risk: +1, desc: "Core inflation momentum (3m vs 12m)"}
+
+  - id: PCEPILFE
+    name: Core PCE Price Index
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 28
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: +1, desc: "Core PCE inflation, year over year"}
+
+  # ------------------------------------------- alternative / high-frequency ----
+  - id: HTRUCKSSAAR
+    name: Heavy Truck Sales
+    category: alt_hf
+    source: fred
+    frequency: m
+    publication_lag_days: 35
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy,    risk: -1, desc: "Heavy truck sales, year over year"}
+      - {t: dmax2y, risk: -1, desc: "Heavy truck sales vs 2-year high"}
+
+  - id: TRFVOLUSM227NFWA
+    name: Vehicle Miles Traveled
+    category: alt_hf
+    source: fred
+    frequency: m
+    publication_lag_days: 50
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: -1, desc: "Vehicle miles traveled, year over year"}
+
+  - id: TSIFRGHT
+    name: Freight Transportation Services Index
+    category: alt_hf
+    source: fred
+    frequency: m
+    publication_lag_days: 45
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy,   risk: -1, desc: "Freight activity, year over year"}
+      - {t: ann6m, risk: -1, desc: "Freight activity 6-month trend"}
+
+# Ground-truth label source. NEVER used as a model input; listed here only so
+# the pipeline fetches and health-checks it.
+labels:
+  - id: USREC
+    name: NBER Recession Indicator (monthly)
+    source: fred
+    frequency: m
