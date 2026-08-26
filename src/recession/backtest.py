@@ -360,6 +360,95 @@ def run_backtest(
     )
 
 
+LONG_H = 365
+LONG_DETECT = 0.35  # base rate of the 1y target is ~5x the 90d one
+
+
+def run_long_backtest(
+    X: pd.DataFrame,
+    labels: pd.DataFrame,
+    feature_cols: list[str],
+) -> dict:
+    """Walk-forward backtest for the dedicated 1-year onset classifier.
+
+    Same recession-aware folds and inner-split calibration as the 90-day
+    model, with a purge widened to EMBARGO + 365 days so no 1-year label
+    window overlaps a test period. Members are the production architecture
+    (elastic net + gradient boosting); the served probability is their
+    calibrated mean, floored at P90 downstream (pool-adjacent-violators
+    between the two horizon estimates).
+    """
+    y = labels[f"y{LONG_H}"]
+    el = labels["eligible_long"].astype(bool)
+    folds = make_folds(X.index)
+    protos = {k: v for k, v in build_models(feature_cols).items()
+              if k in ("B_elastic_net", "C_grad_boost")}
+
+    oos = labels[[f"y{LONG_H}", "eligible_long", "next_onset"]].copy()
+    oos["fold"] = np.nan
+    for f in folds:
+        train_end = f["test_start"] - pd.Timedelta(days=EMBARGO_DAYS + LONG_H)
+        tr = (X.index >= TRAIN_START) & (X.index <= train_end) & el.to_numpy()
+        te = (X.index >= f["test_start"]) & (X.index <= f["test_end"])
+        train_idx = X.index[tr]
+        if len(train_idx) < 100:
+            continue
+        oos.loc[te, "fold"] = f["k"]
+        fit_idx, cal_idx = inner_split(train_idx)
+        for mname, proto in protos.items():
+            inner, cals = fit_fold_calibrators(proto, X, y, labels, fit_idx, cal_idx)
+            p_inner = inner.predict_proba(X[te])[:, 1]
+            for cname, cal in cals.items():
+                oos.loc[te, f"p_{cname}_{mname}"] = cal.transform(p_inner)
+    oos = oos.dropna(subset=["fold"])
+    elo = oos["eligible_long"].astype(bool)
+
+    calibrator_choice: dict[str, str] = {}
+    for mname in protos:
+        scores = {}
+        for cname in ("none", "platt", "isotonic"):
+            col = f"p_{cname}_{mname}"
+            if col not in oos.columns:
+                continue
+            p = oos.loc[elo, col].astype(float).fillna(oos.loc[elo, f"p_none_{mname}"].astype(float))
+            yy = oos.loc[elo, f"y{LONG_H}"].astype(int)
+            scores[cname] = brier_score_loss(yy, p) + 0.25 * log_loss_w(yy, p)
+        best = min(scores, key=scores.get)
+        calibrator_choice[mname] = best
+        oos[f"p_cal_{mname}"] = (
+            oos[f"p_{best}_{mname}"].astype(float).fillna(oos[f"p_none_{mname}"].astype(float))
+        )
+    oos["p_cal_long"] = oos[[f"p_cal_{m}" for m in protos]].mean(axis=1)
+
+    metrics = {
+        m: metric_block(oos.loc[elo, f"y{LONG_H}"], oos.loc[elo, f"p_cal_{m}"])
+        for m in protos
+    }
+    metrics["ensemble_1y"] = metric_block(oos.loc[elo, f"y{LONG_H}"], oos.loc[elo, "p_cal_long"])
+
+    # per-recession: max calibrated 1y probability in the 12 months pre-onset
+    onsets = sorted(pd.DatetimeIndex(oos.loc[oos[f"y{LONG_H}"] == 1, "next_onset"].dropna().unique()))
+    events = []
+    for o in onsets:
+        pre = oos.index[(oos.index < o) & (oos.index >= o - pd.Timedelta(days=365)) & elo]
+        if len(pre) == 0:
+            continue
+        p_pre = oos.loc[pre, "p_cal_long"].astype(float)
+        events.append({
+            "onset": str(pd.Timestamp(o).date()),
+            "max_p_1y_before": float(p_pre.max()),
+            "detected": bool(p_pre.max() >= LONG_DETECT),
+        })
+
+    return {
+        "oos": oos[["fold", "eligible_long", f"y{LONG_H}", "p_cal_long"]],
+        "metrics": metrics,
+        "calibrator_choice": calibrator_choice,
+        "events": events,
+        "detect_threshold": LONG_DETECT,
+    }
+
+
 def event_analysis(oos: pd.DataFrame, pcol: str) -> tuple[list, list]:
     """Per-recession detection stats + false-alarm episodes, on OOS rows."""
     el = oos["eligible"].astype(bool)

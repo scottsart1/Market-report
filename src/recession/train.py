@@ -14,7 +14,10 @@ import numpy as np
 import pandas as pd
 
 from . import MODEL_VERSION
-from .backtest import TRAIN_START, fit_fold_calibrators, inner_split, run_backtest
+from .backtest import (
+    LONG_H, TRAIN_START, fit_fold_calibrators, inner_split, run_backtest,
+    run_long_backtest,
+)
 from .config import load_config
 from .horizon import HazardTermStructure
 from .labels import HORIZONS, build_recession_calendar, make_labels
@@ -69,6 +72,11 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
     production = bt.selection["production_model"]
     log.info("Production model selected: %s", production)
 
+    # dedicated 1-year onset classifier, same validation discipline
+    long_bt = run_long_backtest(Xw, labels, feature_cols)
+    log.info("1-year model backtest done (ensemble Brier %.4f)",
+             long_bt["metrics"]["ensemble_1y"]["brier"])
+
     # -------------------------------------- production fit ("fold 8")
     # The production predictor uses EXACTLY the construction the walk-forward
     # validated seven times: model fitted on the first 75% of eligible
@@ -96,13 +104,33 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
     theta = HazardTermStructure()
     theta.theta_ = dict(bt.theta)
 
+    # production 1-year models: identical fold-8 construction on the
+    # long-eligible rows (which end a year before the labeled edge)
+    tr_long = (Xw.index >= TRAIN_START) & labels["eligible_long"].to_numpy()
+    long_idx = Xw.index[tr_long]
+    fit_idx_l, cal_idx_l = inner_split(long_idx)
+    y365_ser = labels[f"y{LONG_H}"]
+    models_long, calibrators_long = {}, {}
+    for name in ("B_elastic_net", "C_grad_boost"):
+        inner, cals = fit_fold_calibrators(
+            build_models(feature_cols)[name], Xw, y365_ser, labels, fit_idx_l, cal_idx_l
+        )
+        models_long[name] = inner
+        method = long_bt["calibrator_choice"].get(name, "none")
+        calibrators_long[name] = cals.get(method, cals["none"])
+
     # ------------------------------------------------ bootstrap uncertainty
-    boot_models = []
+    boot_models, boot_models_long = [], []
     if not fast:
         boot_models = fit_bootstrap_models(
             Xw.loc[fit_idx], y90_ser.loc[fit_idx].to_numpy(),
             labels.loc[fit_idx, "next_onset"], feature_cols,
             fixed_C=fitted["B_elastic_net"].C_,
+        )
+        boot_models_long = fit_bootstrap_models(
+            Xw.loc[fit_idx_l], y365_ser.loc[fit_idx_l].to_numpy(),
+            labels.loc[fit_idx_l, "next_onset"], feature_cols,
+            fixed_C=models_long["B_elastic_net"].C_,
         )
 
     train_medians = X_tr.median(numeric_only=True)
@@ -115,6 +143,10 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         "models": fitted,
         "calibrators": calibrators,
         "calibrator_choice": bt.calibrator_choice,
+        "models_long": models_long,
+        "calibrators_long": calibrators_long,
+        "calibrator_choice_long": long_bt["calibrator_choice"],
+        "long_horizon": LONG_H,
         "theta": bt.theta,
         "feature_cols": feature_cols,
         "train_medians": train_medians,
@@ -129,6 +161,7 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         "n_train_events": int(labels.loc[tr, "next_onset"][labels.loc[tr, "y90"] == 1].nunique()),
         "dataset_version": dataset_version(fetched),
         "boot_models": boot_models,
+        "boot_models_long": boot_models_long,
         "selection": bt.selection,
         "horizons": list(HORIZONS),
         "label_convention": (
@@ -148,6 +181,12 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         "theta": bt.theta,
         "metrics": bt.metrics,
         "horizon_metrics": bt.horizon_metrics,
+        "long_model": {
+            "metrics": long_bt["metrics"],
+            "calibrator_choice": long_bt["calibrator_choice"],
+            "events": long_bt["events"],
+            "detect_threshold": long_bt["detect_threshold"],
+        },
         "events": bt.events,
         "false_alarms": bt.false_alarms,
         "reliability": bt.reliability,
@@ -163,6 +202,12 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         + [c for c in bt.oos.columns if c.startswith(("p_raw_", "p_cal_"))]
         + [f"p{h}" for h in HORIZONS]
     ].copy()
+    # served 1-year probability: calibrated long ensemble, floored at P90
+    p_long = long_bt["oos"]["p_cal_long"].reindex(oos_out.index).to_numpy(dtype=float)
+    p90 = oos_out["p90"].to_numpy(dtype=float)
+    oos_out[f"p{LONG_H}"] = np.where(np.isnan(p_long), np.nan, np.maximum(p_long, p90))
+    oos_out[f"y{LONG_H}"] = labels[f"y{LONG_H}"].reindex(oos_out.index)
+    oos_out["eligible_long"] = labels["eligible_long"].reindex(oos_out.index)
     oos_out.index.name = "date"
     oos_out.to_parquet(OOS_PATH)
 
@@ -227,6 +272,15 @@ recession event(s) in the calibration window).
 | Model | Brier | Log loss | ROC AUC | PR AUC | ECE |
 |---|---|---|---|---|---|
 {chr(10).join(_row(n) for n in ["A_yield_curve", "B_elastic_net", "C_grad_boost", "D_ensemble", "bl_constant", "bl_sahm", "bl_nfci"] if n in m)}
+
+**1-year horizon.** A dedicated classifier (same architecture and validation,
+purge widened to 455 days) serves the 365-day probability; it is floored at
+P90 so the full horizon chain stays monotone. Out-of-sample (calibrated):
+Brier {results['long_model']['metrics']['ensemble_1y']['brier']:.4f},
+ROC AUC {results['long_model']['metrics']['ensemble_1y'].get('roc_auc', float('nan')):.3f},
+base rate {results['long_model']['metrics']['ensemble_1y']['base_rate']:.3f};
+{sum(e['detected'] for e in results['long_model']['events'])}/{len(results['long_model']['events'])}
+recessions reached P1y >= {results['long_model']['detect_threshold']:.2f} in the prior year.
 
 **Recession-by-recession (out-of-sample, production model)**
 

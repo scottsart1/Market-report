@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -292,7 +293,10 @@ def fetch_series(
     out: dict[str, SeriesResult] = {}
 
     modes = ["latest"]
-    if want_vintage and api_key:
+    # RECESSION_SKIP_VINTAGE=1 skips first-release downloads — prediction-only
+    # refreshes use latest-vintage data anyway; training needs the vintages.
+    skip_vintage = os.environ.get("RECESSION_SKIP_VINTAGE", "").strip() not in ("", "0")
+    if want_vintage and api_key and not skip_vintage:
         modes.append("first_release")
 
     for mode in modes:

@@ -55,7 +55,7 @@ dates.
 | Models | A: yield-curve probit · B: elastic-net logistic · C: histogram gradient boosting · D: calibrated ensemble · plus constant / Sahm-rule / financial-conditions baselines | Compare rather than assume; the production model is selected on out-of-sample Brier score |
 | Validation | Expanding-window, recession-aware folds with a 180-day purge between train and test | Every post-1978 recession is genuinely out of sample exactly once; two recession-free folds price false alarms |
 | Calibration | none vs Platt vs isotonic, chosen and fitted **only on out-of-sample predictions** | A "30%" must mean ≈30% historically |
-| Horizons | Hazard power law `P(h) = 1 − (1 − P90)^θₕ`, θ fitted OOS per horizon, monotone by pool-adjacent-violators | Structural `P15 ≤ P30 ≤ P45 ≤ P60 ≤ P90` — no sorting of unrelated predictions; 15-day-only classifiers would rest on a handful of events |
+| Horizons | Hazard power law `P(h) = 1 − (1 − P90)^θₕ`, θ fitted OOS per horizon, monotone by pool-adjacent-violators; a **dedicated 1-year classifier** (same architecture, purge widened to 455 days) serves the 365-day probability, floored at P90 | Structural `P15 ≤ P30 ≤ … ≤ P90 ≤ P365` — no sorting of unrelated predictions; 15-day-only classifiers would rest on a handful of events, while a year-ahead forecast genuinely needs its own model (yield-curve information peaks near 12 months) |
 | Uncertainty | 2-year moving-block bootstrap, 10–90% band | ~8 recessions of history ⇒ ranges, not decimals |
 | Explanations | Feature-substitution attribution from the actual model + fixed plain-English templates from config | Never narrative-invented |
 
@@ -83,6 +83,10 @@ src/recession/
     train.py               End-to-end training CLI, artifacts, model card
 models/trained/            production_bundle.joblib, backtest_results.json,
                            oos_predictions.parquet, model_card.md
+site/                      template.html + build.py — renders the static
+                           snapshot page published as a Claude Artifact
+                           (python site/build.py; RECESSION_SKIP_VINTAGE=1
+                           makes prediction-only refreshes fast)
 data/                      raw/ (per-series cache) — gitignored, rebuilt from APIs
 tests/                     leakage, labels, monotonicity, staleness, folds
 ```

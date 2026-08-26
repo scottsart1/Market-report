@@ -1,4 +1,4 @@
-# Model Card — U.S. Recession Probability Model v1.0.0
+# Model Card — U.S. Recession Probability Model v1.1.0
 
 **Target.** Probability that the U.S. economy *enters* an NBER recession within
 15/30/45/60/90 days, conditional on not currently being in one. Ground truth is
@@ -42,6 +42,15 @@ recession event(s) in the calibration window).
 | bl_constant | 0.0531 | 0.2076 | 0.590 | 0.065 | 0.0924 |
 | bl_sahm | 0.0644 | 0.2708 | 0.731 | 0.109 | 0.1047 |
 | bl_nfci | 0.0434 | 0.1787 | 0.700 | 0.260 | 0.0616 |
+
+**1-year horizon.** A dedicated classifier (same architecture and validation,
+purge widened to 455 days) serves the 365-day probability; it is floored at
+P90 so the full horizon chain stays monotone. Out-of-sample (calibrated):
+Brier 0.1300,
+ROC AUC 0.900,
+base rate 0.140;
+6/6
+recessions reached P1y >= 0.35 in the prior year.
 
 **Recession-by-recession (out-of-sample, production model)**
 

@@ -68,6 +68,18 @@ def bundle_predictor(bundle: dict):
     return fn
 
 
+def bundle_long_cal(bundle: dict, X: pd.DataFrame) -> np.ndarray | None:
+    """Calibrated 1-year onset probability (mean of calibrated members),
+    before the P90 monotonicity floor. None for pre-1.1 bundles."""
+    if "models_long" not in bundle:
+        return None
+    ps = []
+    for m, model in bundle["models_long"].items():
+        raw = model.predict_proba(X)[:, 1]
+        ps.append(bundle["calibrators_long"][m].transform(raw))
+    return np.mean(ps, axis=0)
+
+
 def bundle_score_predictor(bundle: dict):
     """Smooth pre-calibration ensemble probability, used for attribution.
 
@@ -149,18 +161,25 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
     curve = pd.DataFrame(
         {f"p{h}": v for h, v in ts.term_structure(p90_daily).items()}, index=tail.index
     )
+    display_horizons = list(HORIZONS)
+    p_long_daily = bundle_long_cal(bundle, tail)
+    if p_long_daily is not None:
+        lh = int(bundle.get("long_horizon", 365))
+        # monotonicity floor: the 1-year probability can never sit below P90
+        curve[f"p{lh}"] = np.maximum(p_long_daily, curve["p90"].to_numpy())
+        display_horizons.append(lh)
 
     x_today = X_all.iloc[[-1]]
     data_date = X_all.index[-1]
     p90_today = float(p90_daily[-1])
-    probs = {h: float(curve[f"p{h}"].iloc[-1]) for h in HORIZONS}
+    probs = {h: float(curve[f"p{h}"].iloc[-1]) for h in display_horizons}
 
     def deltas_vs(days: int) -> dict[int, float]:
         cutoff = data_date - pd.Timedelta(days=days)
         past = curve[curve.index <= cutoff]
         if past.empty:
-            return {h: np.nan for h in HORIZONS}
-        return {h: probs[h] - float(past[f"p{h}"].iloc[-1]) for h in HORIZONS}
+            return {h: np.nan for h in display_horizons}
+        return {h: probs[h] - float(past[f"p{h}"].iloc[-1]) for h in display_horizons}
 
     changes = {"1d": deltas_vs(1), "7d": deltas_vs(7), "30d": deltas_vs(30)}
 
@@ -191,6 +210,16 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
     if band and prod != "B_elastic_net":
         shift = probs[90] - float(np.mean(band[90]))
         band = {h: (max(0.0, lo + shift), min(1.0, hi + shift)) for h, (lo, hi) in band.items()}
+
+    # 1-year band from the dedicated long-horizon bootstrap
+    if p_long_daily is not None and bundle.get("boot_models_long"):
+        cal_bl = bundle["calibrators_long"]["B_elastic_net"]
+        ps = cal_bl.transform(np.array(
+            [m.predict_proba(x_today)[0, 1] for m in bundle["boot_models_long"]]
+        ))
+        lo, hi = (float(q) for q in np.quantile(ps, (0.10, 0.90)))
+        shift = probs[lh] - (lo + hi) / 2
+        band[lh] = (max(0.0, lo + shift), min(1.0, hi + shift))
 
     # ------------------------------------------------------- categories/health
     scores = category_scores(Xw.reindex(columns=feature_cols), cfg)
@@ -227,8 +256,9 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
         "probabilities": probs,
         "p90_raw_base": p90_today,
         "changes": changes,
-        "classification": {h: classify(probs[h]) for h in HORIZONS},
+        "classification": {h: classify(probs[h]) for h in display_horizons},
         "overall_classification": classify(probs[90]),
+        "horizons": display_horizons,
         "band": band,
         "confidence": confidence,
         "confidence_detail": {

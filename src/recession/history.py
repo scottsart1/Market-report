@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS predictions (
 def _conn() -> sqlite3.Connection:
     con = sqlite3.connect(HISTORY_DB)
     con.execute(SCHEMA)
+    try:  # schema migration: 1-year horizon added in v1.1
+        con.execute("ALTER TABLE predictions ADD COLUMN p365 REAL")
+    except sqlite3.OperationalError:
+        pass
     return con
 
 
@@ -39,14 +43,15 @@ def save_prediction(pred: dict) -> None:
     with con:
         con.execute(
             """INSERT INTO predictions
-               (ts_utc, data_date, p15, p30, p45, p60, p90, p90_lo, p90_hi,
+               (ts_utc, data_date, p15, p30, p45, p60, p90, p365, p90_lo, p90_hi,
                 model_version, model_name, calibration, train_end,
                 dataset_version, n_indicators_ok, n_indicators_missing, features_json)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 datetime.now(timezone.utc).isoformat(),
                 str(pred["data_date"]),
                 *(float(pred["probabilities"][h]) for h in (15, 30, 45, 60, 90)),
+                float(pred["probabilities"][365]) if 365 in pred["probabilities"] else None,
                 float(pred.get("band", {}).get(90, (None, None))[0] or 0) or None,
                 float(pred.get("band", {}).get(90, (None, None))[1] or 0) or None,
                 pred.get("model_version"),

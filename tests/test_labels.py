@@ -43,6 +43,21 @@ def test_eligibility(synthetic_usrec):
     assert lab.loc["1995-06-02", "eligible"]
 
 
+def test_long_horizon_labels(synthetic_usrec):
+    cal = build_recession_calendar(synthetic_usrec)
+    grid = pd.date_range("1988-01-01", "2012-12-31", freq="W-FRI")
+    lab = make_labels(grid, cal)
+    # the 1-year window contains every shorter window
+    assert (lab["y365"] >= lab["y90"]).all()
+    # a row 6 months before onset is a 1y positive but a 90d negative
+    row = lab.loc["2007-12-07"]
+    assert row["y365"] == 1 and row["y90"] == 0
+    # long labels need a full year of labeled future
+    tail = lab[lab.index > cal.last_label_date - pd.Timedelta(days=365)]
+    assert not tail["eligible_long"].any()
+    assert lab.loc["1995-06-02", "eligible_long"]
+
+
 def test_next_onset_assignment(synthetic_usrec):
     cal = build_recession_calendar(synthetic_usrec)
     grid = pd.date_range("1988-01-01", "2010-12-31", freq="W-FRI")

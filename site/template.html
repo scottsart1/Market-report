@@ -1,0 +1,597 @@
+<title>U.S. Recession Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Libre+Franklin:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+  --grid:#e1e0d9; --axis:#c3c2b7; --border:rgba(11,11,11,0.10);
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#008300;
+  --risk-up:#e34948; --risk-dn:#2a78d6;
+  --good:#0ca30c; --warn:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --band:rgba(42,120,214,0.14); --shade:rgba(137,135,129,0.16);
+  --chip:#f0efec;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+    --risk-up:#e66767; --risk-dn:#3987e5;
+    --band:rgba(57,135,229,0.18); --shade:rgba(137,135,129,0.14);
+    --chip:#262624;
+  }
+}
+:root[data-theme="dark"]{
+  --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+  --grid:#2c2c2a; --axis:#383835; --border:rgba(255,255,255,0.10);
+  --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#008300;
+  --risk-up:#e66767; --risk-dn:#3987e5;
+  --band:rgba(57,135,229,0.18); --shade:rgba(137,135,129,0.14);
+  --chip:#262624;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--ink);
+  font-family:'Libre Franklin',system-ui,-apple-system,'Segoe UI',sans-serif;
+  font-size:15px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.mono{font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace}
+.wrap{max-width:1100px;margin:0 auto;padding:28px 20px 64px}
+a{color:var(--s1)}
+h1{font-weight:800;font-size:clamp(26px,4vw,38px);margin:2px 0 6px;letter-spacing:-0.01em;text-wrap:balance}
+h2{font-weight:800;font-size:20px;margin:0 0 4px;letter-spacing:-0.005em}
+.eyebrow{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;
+  letter-spacing:0.14em;text-transform:uppercase;color:var(--muted)}
+.section{margin-top:44px}
+.sec-head{display:flex;flex-direction:column;gap:2px;margin-bottom:14px}
+.sub{color:var(--ink2);font-size:13.5px;max-width:72ch}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.grid5{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:10px}
+.tile .h{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:0.1em;
+  text-transform:uppercase;color:var(--muted);font-weight:600}
+.tile .v{font-weight:800;font-size:clamp(24px,3vw,32px);letter-spacing:-0.02em;margin:2px 0 4px}
+.tile .cls{font-size:12.5px;font-weight:600;color:var(--ink2)}
+.tile .d{font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink2);margin-top:6px;
+  font-variant-numeric:tabular-nums;line-height:1.7}
+.dchip{display:inline-block;padding:0 5px;border-radius:4px;background:var(--chip)}
+.up{color:var(--risk-up)} .dn{color:var(--good)}
+.pillrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:10px 0 0}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 11px;border-radius:999px;
+  font-size:12.5px;font-weight:600;border:1px solid var(--border);background:var(--surface)}
+.pill .dot{width:8px;height:8px;border-radius:50%}
+.meta{font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink2);line-height:1.8;
+  font-variant-numeric:tabular-nums}
+.meta b{color:var(--ink);font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media(max-width:860px){.two{grid-template-columns:1fr}}
+.fact{display:flex;gap:10px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--grid);font-size:13.5px}
+.fact:last-child{border-bottom:none}
+.fact .pp{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+.fact .cat{color:var(--muted);font-size:12px;white-space:nowrap}
+.tablewrap{overflow-x:auto;border:1px solid var(--border);border-radius:10px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-family:'IBM Plex Mono',monospace;font-size:10.5px;letter-spacing:0.08em;text-transform:uppercase;
+  color:var(--muted);font-weight:600;text-align:left;padding:9px 12px;border-bottom:1px solid var(--grid);
+  white-space:nowrap;cursor:pointer;user-select:none}
+th.noclick{cursor:default}
+td{padding:7px 12px;border-bottom:1px solid var(--grid);white-space:nowrap;
+  font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:none}
+td.num{font-family:'IBM Plex Mono',monospace;font-size:12.5px}
+.sig-up{color:var(--risk-up);font-weight:600} .sig-dn{color:var(--good);font-weight:600}
+.status-fresh{color:var(--good);font-weight:600}
+.status-stale,.status-cache_fallback{color:var(--serious);font-weight:600}
+.status-error{color:var(--critical);font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.chips button{font-family:'IBM Plex Mono',monospace;font-size:11.5px;padding:4px 11px;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface);color:var(--ink2);cursor:pointer}
+.chips button.on{background:var(--s1);border-color:var(--s1);color:#fff}
+.chips button:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--ink2);margin:6px 0 2px}
+.legend .sw{display:inline-block;width:14px;height:3px;border-radius:2px;vertical-align:middle;margin-right:6px}
+.caption{color:var(--muted);font-size:12.5px;margin-top:8px;max-width:80ch}
+svg text{font-family:'IBM Plex Mono',monospace;fill:var(--muted);font-size:11px}
+svg .vlab{fill:var(--ink2);font-weight:600}
+.tooltip{position:fixed;pointer-events:none;background:var(--surface);border:1px solid var(--border);
+  border-radius:8px;padding:8px 10px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:var(--ink);
+  box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:10;display:none;line-height:1.7;font-variant-numeric:tabular-nums}
+.warnbox{border-left:3px solid var(--warn);background:var(--surface);border-radius:8px;
+  padding:10px 14px;margin-top:14px;font-size:13.5px;color:var(--ink2)}
+details{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:4px 18px}
+details summary{cursor:pointer;font-weight:600;padding:10px 0;color:var(--ink)}
+details[open] summary{border-bottom:1px solid var(--grid);margin-bottom:10px}
+.md{font-size:13.5px;color:var(--ink2);max-width:78ch}
+.md h1,.md h2,.md h3{color:var(--ink);font-size:15px;margin:18px 0 6px}
+.md table{margin:8px 0;display:block;overflow-x:auto}
+.md code{font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--chip);padding:1px 5px;border-radius:4px}
+.md strong{color:var(--ink)}
+footer{margin-top:52px;padding-top:16px;border-top:1px solid var(--grid);color:var(--muted);font-size:12.5px;max-width:80ch}
+@media (prefers-reduced-motion: no-preference){
+  .tile{transition:transform .15s ease}
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Point-in-time model · FRED / ALFRED data · NBER ground truth</div>
+    <h1>U.S. Recession Monitor</h1>
+    <div class="sub">Probability that the U.S. economy enters an NBER-style recession within each
+      horizon, from a calibrated, walk-forward-backtested hazard model.
+      An analytical estimate with real uncertainty — not an oracle.</div>
+    <div class="pillrow" id="pills"></div>
+    <div class="meta" id="meta" style="margin-top:10px"></div>
+    <div id="recwarn"></div>
+  </header>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 1</div>
+      <h2>Recession probability by horizon</h2>
+    </div>
+    <div class="grid5" id="tiles"></div>
+    <div class="card" style="margin-top:14px">
+      <div class="eyebrow" style="margin-bottom:6px">Term structure — cumulative probability of onset</div>
+      <div id="term"></div>
+      <div class="caption">Shaded band = 10–90% block-bootstrap range (log-scaled horizon axis). 15–90 days share
+        one calibrated hazard mapped through fitted exponents θ (structurally monotone);
+        the 1-year value comes from a dedicated classifier floored at P90, keeping the
+        whole chain monotone.</div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 2</div>
+      <h2>Why risk is where it is — and why it moved</h2>
+      <div class="sub">Feature-substitution attribution computed from the production model itself,
+        never narrated. All horizons share these drivers through the hazard term structure.</div>
+    </div>
+    <div class="two">
+      <div class="card">
+        <div class="eyebrow" style="margin-bottom:8px">Current drivers vs neutral (median) conditions</div>
+        <div id="factors"></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow" style="margin-bottom:8px">Contribution to the 7-day change <span id="wkchg"></span></div>
+        <div id="contrib"></div>
+        <div class="caption">Red pushed risk up this week; blue pulled it down — in pp of the model's
+          smooth pre-calibration score (calibration is monotone, so directions carry through).</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 3</div>
+      <h2>Category stress scores</h2>
+      <div class="sub">Diagnostic 0–100 composites of risk-oriented indicator percentiles —
+        context for the probability model, not a substitute for it.</div>
+    </div>
+    <div class="card"><div id="cats"></div></div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 4</div>
+      <h2>Leading indicators</h2>
+    </div>
+    <div class="chips" id="catchips"></div>
+    <div class="tablewrap" style="max-height:430px;overflow-y:auto"><table id="snaptable"></table></div>
+    <div class="caption">Signal = risk-oriented percentile of the indicator's model features
+      (≥70 ⇒ risk ↑, ≤30 ⇒ risk ↓). Click a column header to sort.</div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 5</div>
+      <h2>Historical out-of-sample probability</h2>
+      <div class="sub">Every point comes from a model trained only on data available before that
+        fold, on first-release (vintage) inputs — what the model would genuinely have said in
+        real time. Gray bands are NBER recessions; pre-1984 output is raw and uncalibrated.</div>
+    </div>
+    <div class="card">
+      <div class="chips" id="hchips"></div>
+      <div id="hist"></div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 6</div>
+      <h2>Backtest &amp; calibration</h2>
+      <div class="sub" id="selline"></div>
+    </div>
+    <div class="tablewrap"><table id="mtable"></table></div>
+    <div class="two" style="margin-top:16px">
+      <div class="card">
+        <div class="eyebrow" style="margin-bottom:6px">Reliability (out-of-sample, 90-day)</div>
+        <div class="legend" id="rellegend"></div>
+        <div id="rel"></div>
+      </div>
+      <div class="card">
+        <div class="eyebrow" style="margin-bottom:6px">Recession-by-recession (production model)</div>
+        <div class="tablewrap" style="border:none"><table id="evtable"></table></div>
+        <div class="caption" id="evsummary"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 7</div>
+      <h2>Data health</h2>
+      <div class="sub" id="healthline"></div>
+    </div>
+    <div class="tablewrap" style="max-height:420px;overflow-y:auto"><table id="htable"></table></div>
+    <div class="caption">Monthly macro series are inherently 2–8 weeks old — “days since obs.”
+      reflects publication lag, not an error.</div>
+  </section>
+
+  <section class="section">
+    <div class="sec-head">
+      <div class="eyebrow">Section 8</div>
+      <h2>Methodology &amp; model card</h2>
+    </div>
+    <details><summary>Read the full model card and conventions</summary>
+      <div class="md" id="card"></div>
+      <div class="md">
+        <h3>Key conventions</h3>
+        <p><strong>NBER timing.</strong> NBER dates recessions to months; onset here = first day of
+        the first recession month. Day-level horizons are a modeling convention via the hazard term
+        structure — the historical labels carry no daily precision.</p>
+        <p><strong>Point-in-time discipline.</strong> Training features use ALFRED first-release
+        values and actual release dates where vintages exist; configured publication lags otherwise.
+        Residual revision bias is disclosed, not hidden. Today's inputs use latest revised data —
+        correct for today's forecaster.</p>
+        <p><strong>Uncertainty.</strong> With ~8 recessions of usable history, read ranges, not
+        decimals: the band is a lower bound on true uncertainty.</p>
+      </div>
+    </details>
+  </section>
+
+  <footer>
+    <div id="stamp"></div>
+    <p>Snapshot page generated by the local model pipeline; ask Claude to refresh it, and it
+    republishes to this same link. Sources: FRED® / ALFRED® (Federal Reserve Bank of St. Louis)
+    and derived public-domain series. Built for analysis — not investment advice.</p>
+  </footer>
+</div>
+
+<div class="tooltip" id="tip"></div>
+
+<script>
+const DATA = /*__DATA__*/;
+
+const H = (DATA.pred.horizons || [15,30,45,60,90]).map(Number);
+const SLOT = {90:'var(--s1)', 30:'var(--s2)', 365:'var(--s3)', 60:'var(--s4)', 45:'var(--s5)', 15:'var(--s6)'};
+const HLABEL = h => h==365 ? '1 year' : h+' days';
+const fmtP = (x,d=1)=> x==null||isNaN(x) ? '—' : (100*x).toFixed(d)+'%';
+const fmtPP = x => x==null||isNaN(x) ? '—' : (100*x>=0?'+':'')+(100*x).toFixed(1)+' pp';
+const el = (t,attrs={},parent=null)=>{const e=document.createElementNS('http://www.w3.org/2000/svg',t);
+  for(const k in attrs)e.setAttribute(k,attrs[k]); if(parent)parent.appendChild(e); return e;};
+const tip = document.getElementById('tip');
+function showTip(html,x,y){tip.innerHTML=html;tip.style.display='block';
+  const w=tip.offsetWidth;tip.style.left=Math.min(x+14,window.innerWidth-w-10)+'px';tip.style.top=(y+14)+'px';}
+function hideTip(){tip.style.display='none';}
+
+const P = DATA.pred, probs = {}, band = {};
+for(const h of H){probs[h]=P.probabilities[h]; if(P.band && P.band[h]) band[h]=P.band[h];}
+
+// ---- header pills & meta ----
+const lvlColor = {'Very Low':'var(--good)','Low':'var(--good)','Moderate':'var(--warn)',
+  'Elevated':'var(--serious)','High':'var(--critical)','Extreme':'var(--critical)'};
+const pills = document.getElementById('pills');
+pills.innerHTML =
+ `<span class="pill"><span class="dot" style="background:${lvlColor[P.overall_classification]||'var(--muted)'}"></span>Overall risk: ${P.overall_classification}</span>`+
+ `<span class="pill">Model confidence: ${P.confidence}</span>`+
+ `<span class="pill mono">P90 ${fmtP(probs[90],2)} · band ${band[90]?fmtP(band[90][0],1)+'–'+fmtP(band[90][1],1):'n/a'}</span>`;
+document.getElementById('meta').innerHTML =
+ `Data through <b>${P.data_date}</b> · refreshed ${new Date(P.generated_at).toISOString().slice(0,16).replace('T',' ')} UTC · `+
+ `model <b>${P.model_name}</b> v${P.model_version} · calibration ${P.calibration} · trained through ${P.train_end} · `+
+ `${P.n_indicators_ok} sources healthy / ${P.n_indicators_missing} degraded`;
+if(P.currently_in_recession_labeled){
+  document.getElementById('recwarn').innerHTML =
+   `<div class="warnbox">The latest published NBER label already marks the economy as in recession;
+    onset probabilities are conditional on not being in one.</div>`;
+}
+
+// ---- tiles ----
+const tiles = document.getElementById('tiles');
+tiles.innerHTML = H.map(h=>{
+  const d1=P.changes['1d'][h], d7=P.changes['7d'][h], d30=P.changes['30d'][h];
+  const cls = (x)=> x>0.0005?'up':(x<-0.0005?'dn':'');
+  const b = band[h]?`range ${fmtP(band[h][0])}–${fmtP(band[h][1])}`:'';
+  return `<div class="card tile">
+    <div class="h">${HLABEL(h)}</div>
+    <div class="v">${fmtP(probs[h],2)}</div>
+    <div class="cls">${P.classification[h]}${b?' · '+b:''}</div>
+    <div class="d"><span class="dchip ${cls(d1)}">${fmtPP(d1)}</span> 1d ·
+      <span class="${cls(d7)}">${fmtPP(d7)}</span> 7d ·
+      <span class="${cls(d30)}">${fmtPP(d30)}</span> 30d</div>
+  </div>`;}).join('');
+
+// ---- term structure ----
+(function(){
+  const W=980, Ht=250, m={l:52,r:18,t:14,b:34};
+  const iw=W-m.l-m.r, ih=Ht-m.t-m.b;
+  let ymax = Math.max(...H.map(h=> band[h]?band[h][1]:probs[h]))*1.35+0.001;
+  const lg=Math.log, h0=lg(H[0]), h1=lg(H[H.length-1]);
+  const X=h=> m.l + iw*(lg(h)-h0)/(h1-h0), Y=v=> m.t + ih*(1-v/ymax);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${Ht}`,width:'100%'},null);
+  for(let i=0;i<=4;i++){const v=ymax*i/4;
+    el('line',{x1:m.l,x2:W-m.r,y1:Y(v),y2:Y(v),stroke:'var(--grid)','stroke-width':1},svg);
+    el('text',{x:m.l-8,y:Y(v)+4,'text-anchor':'end'},svg).textContent=fmtP(v,1);}
+  if(Object.keys(band).length){
+    const pts=H.map(h=>`${X(h)},${Y(band[h][1])}`).concat(H.slice().reverse().map(h=>`${X(h)},${Y(band[h][0])}`));
+    el('polygon',{points:pts.join(' '),fill:'var(--band)'},svg);}
+  el('polyline',{points:H.map(h=>`${X(h)},${Y(probs[h])}`).join(' '),fill:'none',
+    stroke:'var(--s1)','stroke-width':2},svg);
+  for(const h of H){
+    el('circle',{cx:X(h),cy:Y(probs[h]),r:4.5,fill:'var(--s1)',stroke:'var(--surface)','stroke-width':2},svg);
+    el('text',{x:X(h),y:Y(probs[h])-10,'text-anchor':'middle',class:'vlab'},svg).textContent=fmtP(probs[h],2);
+    el('text',{x:X(h),y:Ht-10,'text-anchor':'middle'},svg).textContent=(h==365?'1y':h+'d');
+  }
+  document.getElementById('term').appendChild(svg);
+})();
+
+// ---- factors ----
+(function(){
+  const f=P.factors, box=document.getElementById('factors');
+  const row=(x,up)=>`<div class="fact">
+     <span class="pp" style="color:${up?'var(--risk-up)':'var(--good)'}">${up?'▲':'▼'} ${(x.delta_pp>=0?'+':'')+x.delta_pp.toFixed(1)}</span>
+     <span>${x.label}</span><span class="cat">${x.category}</span></div>`;
+  let html=`<div class="eyebrow" style="font-size:10px;margin:4px 0">Raising risk</div>`;
+  html+= f.increasing.length? f.increasing.slice(0,5).map(x=>row(x,true)).join('') : '<div class="fact">none material</div>';
+  html+=`<div class="eyebrow" style="font-size:10px;margin:10px 0 4px">Lowering risk</div>`;
+  html+= f.decreasing.length? f.decreasing.slice(0,5).map(x=>row(x,false)).join('') : '<div class="fact">none material</div>';
+  box.innerHTML=html;
+})();
+
+// ---- weekly change contributions ----
+(function(){
+  document.getElementById('wkchg').textContent = `· 90-day probability ${fmtPP(P.changes['7d'][90])}`;
+  const fc=P.factors_change_7d||{}, rows=[...(fc.increasing||[]),...(fc.decreasing||[])]
+    .sort((a,b)=>a.delta_pp-b.delta_pp);
+  const box=document.getElementById('contrib');
+  if(!rows.length){box.innerHTML='<div class="fact">No material feature-driven change this week.</div>';return;}
+  const W=470, rh=26, m={l:210,r:46}, Hc=rows.length*rh+8;
+  const maxa=Math.max(...rows.map(r=>Math.abs(r.delta_pp)))||1;
+  const x0=m.l+(W-m.l-m.r)/2, sc=(W-m.l-m.r)/2/maxa;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${Hc}`,width:'100%'});
+  el('line',{x1:x0,x2:x0,y1:0,y2:Hc,stroke:'var(--axis)'},svg);
+  rows.forEach((r,i)=>{
+    const y=i*rh+5, w=Math.abs(r.delta_pp)*sc, up=r.delta_pp>0;
+    el('rect',{x:up?x0:x0-w,y:y,width:Math.max(w,1),height:rh-9,rx:3,
+      fill:up?'var(--risk-up)':'var(--risk-dn)',stroke:'var(--surface)','stroke-width':2},svg);
+    const t=el('text',{x:m.l-8,y:y+12,'text-anchor':'end'},svg);
+    t.textContent=r.label.length>30?r.label.slice(0,29)+'…':r.label;
+    el('text',{x:up?x0+w+5:x0-w-5,y:y+12,'text-anchor':up?'start':'end',class:'vlab'},svg)
+      .textContent=(r.delta_pp>=0?'+':'')+r.delta_pp.toFixed(2);
+  });
+  box.appendChild(svg);
+})();
+
+// ---- categories ----
+(function(){
+  const rows=DATA.categories.slice().sort((a,b)=>b.score-a.score);
+  const W=980, rh=34, m={l:230,r:150}, Hc=rows.length*rh+26;
+  const sc=(W-m.l-m.r)/100;
+  const svg=el('svg',{viewBox:`0 0 ${W} ${Hc}`,width:'100%'});
+  for(const g of [0,25,50,75,100]){
+    el('line',{x1:m.l+g*sc,x2:m.l+g*sc,y1:0,y2:Hc-22,stroke:'var(--grid)'},svg);
+    el('text',{x:m.l+g*sc,y:Hc-8,'text-anchor':'middle'},svg).textContent=g;}
+  rows.forEach((r,i)=>{
+    const y=i*rh+5;
+    const t=el('text',{x:m.l-10,y:y+15,'text-anchor':'end'},svg); t.textContent=r.label;
+    el('rect',{x:m.l,y:y,width:Math.max(r.score*sc,1.5),height:rh-13,rx:3,fill:'var(--s1)',
+      stroke:'var(--surface)','stroke-width':2},svg);
+    if(r.prev_month!=null)
+      el('line',{x1:m.l+r.prev_month*sc,x2:m.l+r.prev_month*sc,y1:y-2,y2:y+rh-11,
+        stroke:'var(--muted)','stroke-width':2},svg);
+    el('text',{x:m.l+r.score*sc+7,y:y+15,class:'vlab'},svg).textContent=r.score.toFixed(0);
+    el('text',{x:W-4,y:y+15,'text-anchor':'end'},svg)
+      .textContent=`1m ${r.prev_month==null?'—':r.prev_month.toFixed(0)} · ${r.trend}`;
+  });
+  document.getElementById('cats').appendChild(svg);
+  const leg=document.createElement('div');leg.className='legend';
+  leg.innerHTML=`<span><span class="sw" style="background:var(--s1);height:10px"></span>current</span>
+    <span><span class="sw" style="background:var(--muted);width:3px;height:12px"></span>1 month ago</span>`;
+  document.getElementById('cats').appendChild(leg);
+})();
+
+// ---- indicator table ----
+(function(){
+  const cols=[['Indicator',0],['Category',0],['Latest',1],['Change',1],['Z-score (10y)',1],
+    ['Percentile (10y)',1],['Stress (0-100)',1],['Signal',0],['Data age (days)',1],['Tier',1]];
+  const tbl=document.getElementById('snaptable');
+  let rows=DATA.snapshot.slice(), sortCol='Stress (0-100)', sortAsc=false;
+  const cats=[...new Set(rows.map(r=>r.Category))].sort();
+  let active=new Set(cats);
+  const chipbox=document.getElementById('catchips');
+  chipbox.innerHTML=cats.map(c=>`<button class="on" data-c="${c}">${c}</button>`).join('');
+  chipbox.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const c=b.dataset.c; if(active.has(c)&&active.size>1){active.delete(c);b.classList.remove('on');}
+    else{active.add(c);b.classList.add('on');} render();});
+  function render(){
+    let v=rows.filter(r=>active.has(r.Category));
+    v.sort((a,b)=>{const x=a[sortCol],y=b[sortCol];
+      if(x==null)return 1; if(y==null)return -1;
+      const cmp= typeof x=='number'&&typeof y=='number' ? x-y : String(x).localeCompare(String(y));
+      return sortAsc?cmp:-cmp;});
+    tbl.innerHTML='<thead><tr>'+cols.map(([c])=>
+      `<th data-c="${c}">${c}${c==sortCol?(sortAsc?' ↑':' ↓'):''}</th>`).join('')+'</tr></thead>'+
+     '<tbody>'+v.map(r=>'<tr>'+cols.map(([c,num])=>{
+        let val=r[c];
+        if(c=='Signal') return `<td class="${val=='risk ↑'?'sig-up':val=='risk ↓'?'sig-dn':''}">${val??'—'}</td>`;
+        if(num&&typeof val=='number') val=Math.abs(val)>=100?val.toFixed(0):val.toFixed(2);
+        return `<td${num?' class="num"':''}>${val??'—'}</td>`;}).join('')+'</tr>').join('')+'</tbody>';
+    tbl.querySelectorAll('th').forEach(th=>th.onclick=()=>{
+      const c=th.dataset.c; if(sortCol==c)sortAsc=!sortAsc; else{sortCol=c;sortAsc=false;} render();});
+  }
+  render();
+})();
+
+// ---- historical chart ----
+(function(){
+  const hd=DATA.hist, dates=hd.dates.map(d=>new Date(d));
+  const HH=(hd.horizons||[15,30,45,60,90]).map(Number);
+  const active=new Set([90,30,365].filter(h=>HH.includes(h)));
+  const chipbox=document.getElementById('hchips');
+  const order=[365,90,60,45,30,15].filter(h=>HH.includes(h));
+  chipbox.innerHTML=order.map(h=>
+    `<button data-h="${h}" class="${active.has(h)?'on':''}">${h==365?'1Y':h+'D'}</button>`).join('');
+  const holder=document.createElement('div'); document.getElementById('hist').appendChild(holder);
+  chipbox.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    const h=+b.dataset.h; if(active.has(h)&&active.size>1){active.delete(h);b.classList.remove('on');}
+    else{active.add(h);b.classList.add('on');} draw();});
+  const t0=dates[0].getTime(), t1=dates[dates.length-1].getTime();
+  function draw(){
+    holder.innerHTML='';
+    const W=980, Hc=330, m={l:52,r:16,t:12,b:30}, iw=W-m.l-m.r, ih=Hc-m.t-m.b;
+    const X=t=> m.l+iw*(t-t0)/(t1-t0), Y=v=> m.t+ih*(1-v);
+    const svg=el('svg',{viewBox:`0 0 ${W} ${Hc}`,width:'100%'});
+    for(const [a,b] of hd.spans){
+      const xa=X(new Date(a).getTime()), xb=X(new Date(b).getTime());
+      el('rect',{x:xa,y:m.t,width:Math.max(xb-xa,2),height:ih,fill:'var(--shade)'},svg);}
+    for(let i=0;i<=4;i++){const v=i/4;
+      el('line',{x1:m.l,x2:W-m.r,y1:Y(v),y2:Y(v),stroke:'var(--grid)'},svg);
+      el('text',{x:m.l-8,y:Y(v)+4,'text-anchor':'end'},svg).textContent=(v*100)+'%';}
+    for(let yr=1980;yr<=2026;yr+=5){
+      const x=X(new Date(yr+'-01-01').getTime());
+      if(x>m.l&&x<W-m.r) el('text',{x:x,y:Hc-8,'text-anchor':'middle'},svg).textContent=yr;}
+    el('line',{x1:m.l,x2:W-m.r,y1:Y(0.3),y2:Y(0.3),stroke:'var(--muted)','stroke-dasharray':'3 4'},svg);
+    el('text',{x:W-m.r-4,y:Y(0.3)-5,'text-anchor':'end'},svg).textContent='30% alert level';
+    for(const h of order){
+      if(!active.has(h))continue;
+      const pts=[]; for(let i=0;i<dates.length;i++){const v=hd['p'+h][i];
+        if(v!=null)pts.push(`${X(dates[i].getTime()).toFixed(1)},${Y(v).toFixed(1)}`);}
+      el('polyline',{points:pts.join(' '),fill:'none',stroke:SLOT[h],'stroke-width':h==90?2:1.6},svg);}
+    // today marker (production model)
+    el('circle',{cx:X(new Date(P.data_date).getTime()),cy:Y(probs[90]),r:5,fill:'var(--ink)',
+      stroke:'var(--surface)','stroke-width':2},svg);
+    // hover
+    const cross=el('line',{y1:m.t,y2:m.t+ih,stroke:'var(--axis)',visibility:'hidden'},svg);
+    const overlay=el('rect',{x:m.l,y:m.t,width:iw,height:ih,fill:'transparent'},svg);
+    overlay.addEventListener('mousemove',ev=>{
+      const r=svg.getBoundingClientRect();
+      const px=(ev.clientX-r.left)*W/r.width;
+      const t=t0+(px-m.l)/iw*(t1-t0);
+      let i=Math.round((dates.length-1)*(t-t0)/(t1-t0)); i=Math.max(0,Math.min(dates.length-1,i));
+      cross.setAttribute('x1',X(dates[i].getTime()));cross.setAttribute('x2',X(dates[i].getTime()));
+      cross.setAttribute('visibility','visible');
+      let html=`<b>${hd.dates[i]}</b>`;
+      for(const h of order) if(active.has(h))
+        html+=`<br><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SLOT[h]};margin-right:6px"></span>${h}d&nbsp; ${fmtP(hd['p'+h][i],1)}`;
+      showTip(html,ev.clientX,ev.clientY);});
+    overlay.addEventListener('mouseleave',()=>{cross.setAttribute('visibility','hidden');hideTip();});
+    const leg=document.createElement('div');leg.className='legend';
+    leg.innerHTML=order.filter(h=>active.has(h)).map(h=>
+      `<span><span class="sw" style="background:${SLOT[h]}"></span>${h==365?'1-year':h+'-day'}</span>`).join('')+
+      `<span><span class="sw" style="background:var(--shade);height:12px"></span>NBER recession</span>
+       <span><span class="sw" style="background:var(--ink);width:8px;height:8px;border-radius:50%"></span>today (production model)</span>`;
+    holder.appendChild(svg); holder.appendChild(leg);
+  }
+  draw();
+})();
+
+// ---- backtest ----
+(function(){
+  const sel=DATA.selection;
+  document.getElementById('selline').innerHTML=
+   `Production model <b class="mono">${sel.production_model}</b> — ${sel.criterion}. `+
+   `Brier improvement vs constant baseline <b>${sel.brier_vs_constant.toFixed(4)}</b>; `+
+   `vs yield-curve probit <b>${sel.brier_vs_yield_curve.toFixed(4)}</b>.`;
+  if(DATA.long_model){const e1=DATA.long_model.metrics.ensemble_1y;
+    const det=DATA.long_model.events.filter(e=>e.detected).length;
+    document.getElementById('selline').innerHTML+=
+     `<br><b>1-year classifier</b> (dedicated model, purge 455d) — OOS Brier ${e1.brier.toFixed(4)}, `+
+     `ROC AUC ${e1.roc_auc?e1.roc_auc.toFixed(3):'—'}, base rate ${(e1.base_rate*100).toFixed(1)}%; `+
+     `${det}/${DATA.long_model.events.length} recessions reached P1y ≥ ${(DATA.long_model.detect_threshold*100).toFixed(0)}% in the prior year.`;}
+  const cols=['Model','Brier ↓','Log loss ↓','ROC AUC ↑','PR AUC ↑','Calib. error ↓','Detect ↑','False alarms ↓'];
+  const key=['model','brier','log_loss','roc_auc','pr_auc','ece','detect','fas'];
+  document.getElementById('mtable').innerHTML=
+   '<thead><tr>'+cols.map(c=>`<th class="noclick">${c}</th>`).join('')+'</tr></thead><tbody>'+
+   DATA.metrics.map(r=>`<tr${r.model==sel.production_model?' style="font-weight:700"':''}>`+
+     key.map((k,i)=>{let v=r[k];
+       if(k=='detect'&&v!=null)v=(v*100).toFixed(0)+'%';
+       else if(k=='fas'&&v!=null)v=v.toFixed(0);
+       else if(typeof v=='number')v=v.toFixed(4);
+       return `<td${i?' class="num"':''}>${v??'—'}</td>`;}).join('')+'</tr>').join('')+'</tbody>';
+
+  // reliability
+  const W=470,Hc=300,m={l:46,r:12,t:10,b:34},iw=W-m.l-m.r,ih=Hc-m.t-m.b;
+  const mx=0.85;
+  const X=v=>m.l+iw*v/mx, Y=v=>m.t+ih*(1-v/mx);
+  const svg=el('svg',{viewBox:`0 0 ${W} ${Hc}`,width:'100%'});
+  for(const g of [0,0.2,0.4,0.6,0.8]){
+    el('line',{x1:m.l,x2:W-m.r,y1:Y(g),y2:Y(g),stroke:'var(--grid)'},svg);
+    el('text',{x:m.l-6,y:Y(g)+4,'text-anchor':'end'},svg).textContent=(g*100)+'%';
+    el('text',{x:X(g),y:Hc-10,'text-anchor':'middle'},svg).textContent=(g*100)+'%';}
+  el('line',{x1:X(0),y1:Y(0),x2:X(mx),y2:Y(mx),stroke:'var(--muted)','stroke-dasharray':'4 4'},svg);
+  const rcolors={D_ensemble:'var(--s1)',B_elastic_net:'var(--s2)',C_grad_boost:'var(--s3)'};
+  const rleg=[];
+  for(const mn in DATA.reliability){
+    const pts=DATA.reliability[mn].map(r=>`${X(Math.min(r.pred,mx))},${Y(Math.min(r.obs,mx))}`);
+    el('polyline',{points:pts.join(' '),fill:'none',stroke:rcolors[mn],'stroke-width':2},svg);
+    DATA.reliability[mn].forEach(r=>el('circle',{cx:X(Math.min(r.pred,mx)),cy:Y(Math.min(r.obs,mx)),
+      r:3.5,fill:rcolors[mn],stroke:'var(--surface)','stroke-width':1.5},svg));
+    rleg.push(`<span><span class="sw" style="background:${rcolors[mn]}"></span>${mn}</span>`);}
+  document.getElementById('rellegend').innerHTML=rleg.join('')+
+    '<span><span class="sw" style="background:var(--muted)"></span>perfect calibration</span>';
+  document.getElementById('rel').appendChild(svg);
+
+  // events
+  document.getElementById('evtable').innerHTML=
+   '<thead><tr><th class="noclick">Onset</th><th class="noclick">Max P90 (90d prior)</th><th class="noclick">Max (1y)</th><th class="noclick">Lead (days)</th></tr></thead><tbody>'+
+   DATA.events.map(e=>`<tr><td>${e.onset}</td><td class="num">${(e.max_p_90d_before*100).toFixed(0)}%</td>`+
+    `<td class="num">${(e.max_p_365d_before*100).toFixed(0)}%</td><td class="num">${e.lead_days??'—'}</td></tr>`).join('')+'</tbody>';
+  const leads=DATA.events.filter(e=>e.lead_days!=null);
+  document.getElementById('evsummary').textContent=
+   `${leads.length}/${DATA.events.length} recessions flagged (P ≥ 20% in the prior year), mean lead `+
+   `${leads.length?Math.round(leads.reduce((s,e)=>s+e.lead_days,0)/leads.length):0} days · `+
+   `false alarms (P ≥ 30% for ≥28d, no onset in 270d): ${DATA.false_alarms.length}. `+
+   `Misses — 1990 (hard in real time) and 2020 (exogenous shock) — are documented, not optimized away.`;
+})();
+
+// ---- health ----
+(function(){
+  const rows=DATA.health;
+  const fresh=rows.filter(r=>r.status=='fresh').length;
+  document.getElementById('healthline').innerHTML=
+   `${fresh}/${rows.length} sources fresh · ${DATA.refresh.n_vintage_series} series with first-release vintages · `+
+   `dataset <span class="mono">${DATA.refresh.dataset_version}</span> · fetch errors: ${DATA.refresh.n_fetch_errors}`;
+  document.getElementById('htable').innerHTML=
+   '<thead><tr>'+['Series','Category','Tier','Source','Vintage','Latest obs.','Days since obs.','Status']
+     .map(c=>`<th class="noclick">${c}</th>`).join('')+'</tr></thead><tbody>'+
+   rows.map(r=>`<tr><td>${r.name}</td><td>${r.category}</td><td class="num">${r.tier}</td>`+
+    `<td class="num">${r.source??'—'}</td><td>${r.vintage_mode?'✓':''}</td>`+
+    `<td class="num">${r.last_period??'—'}</td><td class="num">${r.days_stale??'—'}</td>`+
+    `<td class="status-${r.status}">${r.status}</td></tr>`).join('')+'</tbody>';
+})();
+
+// ---- model card (tiny markdown renderer) ----
+(function(){
+  const md=DATA.card;
+  let html='', intable=false;
+  for(const raw of md.split('\n')){
+    const line=raw.trimEnd();
+    if(line.startsWith('|')){
+      const cells=line.split('|').slice(1,-1).map(s=>s.trim());
+      if(cells.every(c=>/^-+$/.test(c)))continue;
+      if(!intable){html+='<table>';intable=true;}
+      html+='<tr>'+cells.map(c=>`<td>${inline(c)}</td>`).join('')+'</tr>'; continue;}
+    if(intable){html+='</table>';intable=false;}
+    if(line.startsWith('# ')){html+=`<h2>${inline(line.slice(2))}</h2>`;continue;}
+    if(line.startsWith('- ')){html+=`<p style="margin:2px 0">• ${inline(line.slice(2))}</p>`;continue;}
+    if(line==''){html+='';continue;}
+    html+=`<p>${inline(line)}</p>`;
+  }
+  if(intable)html+='</table>';
+  function inline(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/`(.+?)`/g,'<code>$1</code>');}
+  document.getElementById('card').innerHTML=html;
+})();
+
+document.getElementById('stamp').innerHTML=
+ `<span class="mono">model ${P.model_name} v${P.model_version} · dataset ${P.dataset_version} · `+
+ `θ = {${Object.entries(P.theta).map(([h,t])=>h+'d:'+(+t).toFixed(2)).join(', ')}}</span>`;
+</script>

@@ -24,7 +24,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-HORIZONS = (15, 30, 45, 60, 90)
+HORIZONS = (15, 30, 45, 60, 90)   # served by the shared 90-day hazard
+LONG_HORIZON = 365                # served by a dedicated long-horizon classifier
+ALL_HORIZONS = HORIZONS + (LONG_HORIZON,)
 
 
 @dataclass
@@ -76,7 +78,7 @@ def make_labels(
     onsets = pd.DatetimeIndex(cal.onsets)
     out = pd.DataFrame(index=grid)
     t = grid.to_numpy()
-    for h in horizons:
+    for h in tuple(horizons) + (LONG_HORIZON,):
         hi = grid + pd.Timedelta(days=h)
         # count of onsets <= x for each bound
         y = (
@@ -89,6 +91,9 @@ def make_labels(
     hmax = max(horizons)
     mature = (grid + pd.Timedelta(days=hmax)) <= cal.last_label_date
     out["eligible"] = (~in_rec.to_numpy()) & mature
+    # the 1-year target needs a full year of labeled future to be observable
+    mature_long = (grid + pd.Timedelta(days=LONG_HORIZON)) <= cal.last_label_date
+    out["eligible_long"] = (~in_rec.to_numpy()) & mature_long
     # onset id for event-aware weighting: which onset (if any) a positive
     # y{hmax} row is anticipating (the next onset after t)
     nxt = np.searchsorted(onsets.to_numpy(), t, side="right")

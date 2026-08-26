@@ -161,11 +161,12 @@ if pred.get("currently_in_recession_labeled"):
 
 # ------------------------------------------------------ Section 1: headline --
 st.subheader("Recession probability by horizon")
-cols = st.columns(5)
-for c, h in zip(cols, HORIZONS):
+display_h = [h for h in pred.get("horizons", list(HORIZONS))]
+cols = st.columns(len(display_h))
+for c, h in zip(cols, display_h):
     with c:
         st.metric(
-            label=f"{h} days",
+            label="1 year (365d)" if h == 365 else f"{h} days",
             value=pct(probs[h]),
             delta=pp(pred["changes"]["1d"].get(h)) + " vs yesterday",
             delta_color="inverse",
@@ -178,11 +179,12 @@ for c, h in zip(cols, HORIZONS):
         )
 
 term = go.Figure()
-xs = list(HORIZONS)
+xs = display_h
 if band:
+    bx = [h for h in xs if h in band]
     term.add_trace(go.Scatter(
-        x=xs + xs[::-1],
-        y=[band[h][1] * 100 for h in xs] + [band[h][0] * 100 for h in xs][::-1],
+        x=bx + bx[::-1],
+        y=[band[h][1] * 100 for h in bx] + [band[h][0] * 100 for h in bx][::-1],
         fill="toself", fillcolor=BAND_FILL, line=dict(width=0),
         name="10–90% bootstrap band", hoverinfo="skip",
     ))
@@ -197,13 +199,17 @@ term.update_layout(
     title="Term structure — cumulative probability of recession onset",
     showlegend=False,
 )
-term.update_xaxes(title="Horizon (days)", tickvals=xs)
+term.update_xaxes(
+    title="Horizon (days, log scale)", type="log",
+    tickvals=xs, ticktext=[str(h) for h in xs],
+)
 term.update_yaxes(title="Probability (%)", rangemode="tozero")
 st.plotly_chart(style_fig(term, 300), use_container_width=True)
 st.caption(
-    "Shaded band = 10–90% bootstrap range. Monotonicity (P15 ≤ P30 ≤ … ≤ P90) is "
-    "structural: horizons share one calibrated 90-day hazard mapped through "
-    "fitted exponents θ (see Methodology)."
+    "Shaded band = 10–90% bootstrap range. 15–90 days share one calibrated hazard "
+    "mapped through fitted exponents θ (structurally monotone); the 1-year value "
+    "comes from a dedicated classifier floored at P90, so the whole chain stays "
+    "monotone (see Methodology)."
 )
 
 # ---------------------------------------------------- Section 2: why moved ---
@@ -314,20 +320,24 @@ except Exception as exc:
     st.info(f"Backtest artifacts unavailable: {exc}")
 
 if oos is not None:
+    avail_h = [h for h in (365, 90, 60, 45, 30, 15) if f"p{h}" in oos.columns]
     hsel = st.multiselect(
-        "Horizons", [f"{h}D" for h in HORIZONS], default=["90D", "30D"], key="hsel"
+        "Horizons", [f"{h}D" for h in avail_h],
+        default=[h for h in ("90D", "30D", "365D") if h in [f"{x}D" for x in avail_h]],
+        key="hsel",
     )
     fig = go.Figure()
     for a, b in recession_spans(oos["in_recession"]):
         fig.add_vrect(x0=a, x1=b, fillcolor=SHADE, line_width=0)
-    horder = [90, 30, 60, 45, 15]  # legend/assignment follows fixed palette slots
-    colors = {90: BLUE, 30: ORANGE, 60: AQUA, 45: YELLOW, 15: "#e87ba4"}
+    horder = [90, 30, 365, 60, 45, 15]  # legend/assignment follows fixed palette slots
+    colors = {90: BLUE, 30: ORANGE, 365: AQUA, 60: YELLOW, 45: "#e87ba4", 15: "#008300"}
     for h in horder:
-        if f"{h}D" not in hsel:
+        if f"{h}D" not in hsel or f"p{h}" not in oos.columns:
             continue
         fig.add_trace(go.Scatter(
             x=oos.index, y=oos[f"p{h}"] * 100, mode="lines",
-            line=dict(color=colors[h], width=2), name=f"{h}-day",
+            line=dict(color=colors[h], width=2),
+            name="1-year" if h == 365 else f"{h}-day",
         ))
     fig.add_trace(go.Scatter(
         x=[pd.Timestamp(pred["data_date"])], y=[probs[90] * 100], mode="markers",
@@ -431,6 +441,18 @@ if results is not None:
             st.dataframe(
                 pf[cols_show].style.format({c: "{:.4f}" for c in ("brier", "log_loss", "roc_auc", "ece")}, na_rep="—"),
                 use_container_width=True, hide_index=True,
+            )
+        lm = results.get("long_model")
+        if lm:
+            e1 = lm["metrics"]["ensemble_1y"]
+            det = sum(e["detected"] for e in lm["events"])
+            st.markdown(
+                f"**1-year classifier (dedicated model)** — OOS Brier "
+                f"{e1['brier']:.4f}, ROC AUC {e1.get('roc_auc', float('nan')):.3f}, "
+                f"PR AUC {e1.get('pr_auc', float('nan')):.3f}, base rate "
+                f"{e1['base_rate']:.3f}; {det}/{len(lm['events'])} recessions reached "
+                f"P1y ≥ {lm['detect_threshold']:.0%} in the prior year "
+                f"(calibrators: {lm['calibrator_choice']})."
             )
         hm = pd.DataFrame(results["horizon_metrics"]).T
         hm.index.name = "Horizon (days)"
