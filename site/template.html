@@ -189,6 +189,9 @@ footer{margin-top:52px;padding-top:16px;border-top:1px solid var(--grid);color:v
         real time. Gray bands are NBER recessions; pre-1984 output is raw and uncalibrated.</div>
     </div>
     <div class="card">
+      <div class="eyebrow" style="margin-bottom:6px">Time range</div>
+      <div class="chips" id="rangechips"></div>
+      <div class="eyebrow" style="margin:8px 0 6px">Horizons</div>
       <div class="chips" id="hchips"></div>
       <div id="hist"></div>
     </div>
@@ -435,39 +438,89 @@ tiles.innerHTML = H.map(h=>{
   const hd=DATA.hist, dates=hd.dates.map(d=>new Date(d));
   const HH=(hd.horizons||[15,30,45,60,90]).map(Number);
   const active=new Set([90,30,365].filter(h=>HH.includes(h)));
-  const chipbox=document.getElementById('hchips');
   const order=[365,90,60,45,30,15].filter(h=>HH.includes(h));
+  const chipbox=document.getElementById('hchips');
   chipbox.innerHTML=order.map(h=>
     `<button data-h="${h}" class="${active.has(h)?'on':''}">${h==365?'1Y':h+'D'}</button>`).join('');
-  const holder=document.createElement('div'); document.getElementById('hist').appendChild(holder);
   chipbox.querySelectorAll('button').forEach(b=>b.onclick=()=>{
     const h=+b.dataset.h; if(active.has(h)&&active.size>1){active.delete(h);b.classList.remove('on');}
     else{active.add(h);b.classList.add('on');} draw();});
-  const t0=dates[0].getTime(), t1=dates[dates.length-1].getTime();
+
+  // ---- time-range presets ----
+  const lastD=dates[dates.length-1];
+  const lastSpanEnd=hd.spans.length? new Date(hd.spans[hd.spans.length-1][1]) : null;
+  const qStart=new Date(lastD.getFullYear(), Math.floor(lastD.getMonth()/3)*3, 1);
+  const RANGES={
+    'Full history': dates[0],
+    'Since last recession': lastSpanEnd? new Date(lastSpanEnd.getTime()+86400000) : dates[0],
+    'Last 12 months': new Date(lastD.getTime()-365*86400000),
+    'YTD': new Date(lastD.getFullYear(),0,1),
+    'Last 2 quarters': new Date(qStart.getFullYear(), qStart.getMonth()-3, 1),
+    'This quarter': qStart,
+  };
+  let range='Full history';
+  const rbox=document.getElementById('rangechips');
+  rbox.innerHTML=Object.keys(RANGES).map(k=>
+    `<button data-r="${k}" class="${k===range?'on':''}">${k}</button>`).join('');
+  rbox.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    range=b.dataset.r;
+    rbox.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x.dataset.r===range));
+    draw();});
+
+  const holder=document.createElement('div'); document.getElementById('hist').appendChild(holder);
+  const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
   function draw(){
     holder.innerHTML='';
-    const W=980, Hc=330, m={l:52,r:16,t:12,b:30}, iw=W-m.l-m.r, ih=Hc-m.t-m.b;
-    const X=t=> m.l+iw*(t-t0)/(t1-t0), Y=v=> m.t+ih*(1-v);
+    const t0=Math.max(RANGES[range].getTime(), dates[0].getTime());
+    const t1=lastD.getTime();
+    const i0=dates.findIndex(d=>d.getTime()>=t0);
+    const idx=[]; for(let i=Math.max(i0,0);i<dates.length;i++) idx.push(i);
+    // y-scale: full history keeps 0-100%; zoomed views fit the data
+    let ymax=1.0;
+    if(range!=='Full history'){
+      let mx=0;
+      for(const h of order) if(active.has(h))
+        for(const i of idx){const v=hd['p'+h][i]; if(v!=null&&v>mx)mx=v;}
+      ymax=Math.min(1.0, Math.max(0.03, mx*1.3));
+    }
+    const W=980, Hc=330, m={l:56,r:16,t:12,b:30}, iw=W-m.l-m.r, ih=Hc-m.t-m.b;
+    const X=t=> m.l+iw*(t-t0)/(t1-t0), Y=v=> m.t+ih*(1-Math.min(v,ymax)/ymax);
     const svg=el('svg',{viewBox:`0 0 ${W} ${Hc}`,width:'100%'});
     for(const [a,b] of hd.spans){
-      const xa=X(new Date(a).getTime()), xb=X(new Date(b).getTime());
-      el('rect',{x:xa,y:m.t,width:Math.max(xb-xa,2),height:ih,fill:'var(--shade)'},svg);}
-    for(let i=0;i<=4;i++){const v=i/4;
+      const ta=Math.max(new Date(a).getTime(),t0), tb=Math.min(new Date(b).getTime(),t1);
+      if(tb<=t0||ta>=t1)continue;
+      el('rect',{x:X(ta),y:m.t,width:Math.max(X(tb)-X(ta),2),height:ih,fill:'var(--shade)'},svg);}
+    const dec=ymax<0.1?1:0;
+    for(let i=0;i<=4;i++){const v=ymax*i/4;
       el('line',{x1:m.l,x2:W-m.r,y1:Y(v),y2:Y(v),stroke:'var(--grid)'},svg);
-      el('text',{x:m.l-8,y:Y(v)+4,'text-anchor':'end'},svg).textContent=(v*100)+'%';}
-    for(let yr=1980;yr<=2026;yr+=5){
-      const x=X(new Date(yr+'-01-01').getTime());
-      if(x>m.l&&x<W-m.r) el('text',{x:x,y:Hc-8,'text-anchor':'middle'},svg).textContent=yr;}
-    el('line',{x1:m.l,x2:W-m.r,y1:Y(0.3),y2:Y(0.3),stroke:'var(--muted)','stroke-dasharray':'3 4'},svg);
-    el('text',{x:W-m.r-4,y:Y(0.3)-5,'text-anchor':'end'},svg).textContent='30% alert level';
+      el('text',{x:m.l-8,y:Y(v)+4,'text-anchor':'end'},svg).textContent=(v*100).toFixed(dec)+'%';}
+    // adaptive x ticks
+    const spanDays=(t1-t0)/86400000;
+    const ticks=[];
+    if(spanDays>3700){for(let yr=1965;yr<=2100;yr+=5){const t=new Date(yr+'-01-01').getTime();
+      if(t>t0&&t<t1)ticks.push([t,String(yr)]);}}
+    else if(spanDays>750){for(let yr=1965;yr<=2100;yr++){const t=new Date(yr+'-01-01').getTime();
+      if(t>t0&&t<t1)ticks.push([t,String(yr)]);}}
+    else{const step=spanDays>400?3:1;
+      const d0=new Date(t0); d0.setDate(1);
+      for(let d=new Date(d0);d.getTime()<t1;d.setMonth(d.getMonth()+step)){
+        if(d.getTime()>t0)ticks.push([d.getTime(),MONTHS[d.getMonth()]+" '"+String(d.getFullYear()).slice(2)]);}}
+    for(const [t,lab] of ticks)
+      el('text',{x:X(t),y:Hc-8,'text-anchor':'middle'},svg).textContent=lab;
+    if(ymax>=0.3){
+      el('line',{x1:m.l,x2:W-m.r,y1:Y(0.3),y2:Y(0.3),stroke:'var(--muted)','stroke-dasharray':'3 4'},svg);
+      el('text',{x:W-m.r-4,y:Y(0.3)-5,'text-anchor':'end'},svg).textContent='30% alert level';}
     for(const h of order){
       if(!active.has(h))continue;
-      const pts=[]; for(let i=0;i<dates.length;i++){const v=hd['p'+h][i];
+      const pts=[]; for(const i of idx){const v=hd['p'+h][i];
         if(v!=null)pts.push(`${X(dates[i].getTime()).toFixed(1)},${Y(v).toFixed(1)}`);}
       el('polyline',{points:pts.join(' '),fill:'none',stroke:SLOT[h],'stroke-width':h==90?2:1.6},svg);}
     // today marker (production model)
-    el('circle',{cx:X(new Date(P.data_date).getTime()),cy:Y(probs[90]),r:5,fill:'var(--ink)',
-      stroke:'var(--surface)','stroke-width':2},svg);
+    const tToday=new Date(P.data_date).getTime();
+    if(tToday>=t0&&tToday<=t1)
+      el('circle',{cx:X(tToday),cy:Y(probs[90]),r:5,fill:'var(--ink)',
+        stroke:'var(--surface)','stroke-width':2},svg);
     // hover
     const cross=el('line',{y1:m.t,y2:m.t+ih,stroke:'var(--axis)',visibility:'hidden'},svg);
     const overlay=el('rect',{x:m.l,y:m.t,width:iw,height:ih,fill:'transparent'},svg);
@@ -475,19 +528,21 @@ tiles.innerHTML = H.map(h=>{
       const r=svg.getBoundingClientRect();
       const px=(ev.clientX-r.left)*W/r.width;
       const t=t0+(px-m.l)/iw*(t1-t0);
-      let i=Math.round((dates.length-1)*(t-t0)/(t1-t0)); i=Math.max(0,Math.min(dates.length-1,i));
-      cross.setAttribute('x1',X(dates[i].getTime()));cross.setAttribute('x2',X(dates[i].getTime()));
+      let best=idx[0], bd=Infinity;
+      for(const i of idx){const d=Math.abs(dates[i].getTime()-t); if(d<bd){bd=d;best=i;}}
+      cross.setAttribute('x1',X(dates[best].getTime()));cross.setAttribute('x2',X(dates[best].getTime()));
       cross.setAttribute('visibility','visible');
-      let html=`<b>${hd.dates[i]}</b>`;
+      let html=`<b>${hd.dates[best]}</b>`;
       for(const h of order) if(active.has(h))
-        html+=`<br><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SLOT[h]};margin-right:6px"></span>${h}d&nbsp; ${fmtP(hd['p'+h][i],1)}`;
+        html+=`<br><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SLOT[h]};margin-right:6px"></span>${h==365?'1y':h+'d'}&nbsp; ${fmtP(hd['p'+h][best],1)}`;
       showTip(html,ev.clientX,ev.clientY);});
     overlay.addEventListener('mouseleave',()=>{cross.setAttribute('visibility','hidden');hideTip();});
     const leg=document.createElement('div');leg.className='legend';
     leg.innerHTML=order.filter(h=>active.has(h)).map(h=>
       `<span><span class="sw" style="background:${SLOT[h]}"></span>${h==365?'1-year':h+'-day'}</span>`).join('')+
       `<span><span class="sw" style="background:var(--shade);height:12px"></span>NBER recession</span>
-       <span><span class="sw" style="background:var(--ink);width:8px;height:8px;border-radius:50%"></span>today (production model)</span>`;
+       <span><span class="sw" style="background:var(--ink);width:8px;height:8px;border-radius:50%"></span>today (production model)</span>`
+      +(range!=='Full history'?`<span style="color:var(--muted)">y-axis fitted to range (max ${(ymax*100).toFixed(dec)}%)</span>`:'');
     holder.appendChild(svg); holder.appendChild(leg);
   }
   draw();

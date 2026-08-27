@@ -321,31 +321,64 @@ except Exception as exc:
 
 if oos is not None:
     avail_h = [h for h in (365, 90, 60, 45, 30, 15) if f"p{h}" in oos.columns]
-    hsel = st.multiselect(
-        "Horizons", [f"{h}D" for h in avail_h],
-        default=[h for h in ("90D", "30D", "365D") if h in [f"{x}D" for x in avail_h]],
-        key="hsel",
-    )
+    fcol, hcol = st.columns([2, 3])
+    with fcol:
+        range_choice = st.selectbox(
+            "Time range",
+            ["Full history", "Since last recession", "Last 12 months", "YTD",
+             "Last 2 quarters", "This quarter"],
+            key="hrange",
+        )
+    with hcol:
+        hsel = st.multiselect(
+            "Horizons", [f"{h}D" for h in avail_h],
+            default=[h for h in ("90D", "30D", "365D") if h in [f"{x}D" for x in avail_h]],
+            key="hsel",
+        )
+
+    end_date = oos.index.max()
+    spans_all = recession_spans(oos["in_recession"])
+    q_start = pd.Timestamp(end_date.year, 3 * ((end_date.month - 1) // 3) + 1, 1)
+    range_starts = {
+        "Full history": oos.index.min(),
+        "Since last recession": (spans_all[-1][1] + pd.Timedelta(days=1)) if spans_all else oos.index.min(),
+        "Last 12 months": end_date - pd.Timedelta(days=365),
+        "YTD": pd.Timestamp(end_date.year, 1, 1),
+        "Last 2 quarters": q_start - pd.offsets.MonthBegin(3),
+        "This quarter": q_start,
+    }
+    view = oos[oos.index >= range_starts[range_choice]]
+
     fig = go.Figure()
-    for a, b in recession_spans(oos["in_recession"]):
+    for a, b in recession_spans(view["in_recession"]):
         fig.add_vrect(x0=a, x1=b, fillcolor=SHADE, line_width=0)
     horder = [90, 30, 365, 60, 45, 15]  # legend/assignment follows fixed palette slots
     colors = {90: BLUE, 30: ORANGE, 365: AQUA, 60: YELLOW, 45: "#e87ba4", 15: "#008300"}
+    shown_cols = [f"p{h}" for h in horder if f"{h}D" in hsel and f"p{h}" in view.columns]
     for h in horder:
-        if f"{h}D" not in hsel or f"p{h}" not in oos.columns:
+        if f"{h}D" not in hsel or f"p{h}" not in view.columns:
             continue
         fig.add_trace(go.Scatter(
-            x=oos.index, y=oos[f"p{h}"] * 100, mode="lines",
+            x=view.index, y=view[f"p{h}"] * 100, mode="lines",
             line=dict(color=colors[h], width=2),
             name="1-year" if h == 365 else f"{h}-day",
         ))
-    fig.add_trace(go.Scatter(
-        x=[pd.Timestamp(pred["data_date"])], y=[probs[90] * 100], mode="markers",
-        marker=dict(color=INK, size=9, symbol="diamond"), name="Today (production model)",
-    ))
-    fig.add_hline(y=30, line_dash="dot", line_color=MUTED,
-                  annotation_text="30% alert level", annotation_font_color=MUTED)
-    fig.update_yaxes(title="Probability (%)", range=[0, 100])
+    today_ts = pd.Timestamp(pred["data_date"])
+    if today_ts >= view.index.min():
+        fig.add_trace(go.Scatter(
+            x=[today_ts], y=[probs[90] * 100], mode="markers",
+            marker=dict(color=INK, size=9, symbol="diamond"), name="Today (production model)",
+        ))
+    # full history keeps the 0-100% frame; zoomed views fit the data
+    if range_choice == "Full history":
+        ymax = 100.0
+    else:
+        peak = float(view[shown_cols].max().max() * 100) if shown_cols and len(view) else 3.0
+        ymax = min(100.0, max(3.0, peak * 1.3))
+    if ymax >= 30:
+        fig.add_hline(y=30, line_dash="dot", line_color=MUTED,
+                      annotation_text="30% alert level", annotation_font_color=MUTED)
+    fig.update_yaxes(title="Probability (%)", range=[0, ymax])
     fig.update_layout(title="Walk-forward out-of-sample probabilities · gray bands = NBER recessions")
     st.plotly_chart(style_fig(fig, 420), use_container_width=True)
     st.caption(
