@@ -268,6 +268,44 @@ indicators:
       - {t: level, risk: +1, desc: "Mortgage spread over Treasuries"}
       - {t: chg6m, risk: +1, desc: "Mortgage spread 6-month change"}
 
+  - id: DRTSCILM
+    name: Bank Lending Standards (C&I, SLOOS)
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: 40
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level,  risk: +1, desc: "Share of banks tightening C&I lending standards"}
+      - {t: chg12m, risk: +1, desc: "Lending standards tightening, 12-month change"}
+
+  - id: DRALACBS
+    name: Loan Delinquency Rate (all banks)
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: 75
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: chg12m, risk: +1, desc: "Loan delinquency rate, 12-month change"}
+
+  - id: TOTBKCR
+    name: Bank Credit (all commercial banks)
+    category: credit
+    source: fred
+    frequency: w
+    publication_lag_days: 9
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: ann6m, risk: -1, desc: "Bank credit growth, 6-month annualized"}
+      - {t: yoy,   risk: -1, desc: "Bank credit growth, year over year"}
+
   # Optional ICE BofA OAS series. Restricted license: without an API key FRED's
   # public CSV serves only ~10 years, which is useless for recession backtests,
   # and history is too short (1996+) to cover most recessions anyway. The
@@ -437,6 +475,42 @@ indicators:
     transforms:
       - {t: chg6m, risk: -1, desc: "Employment-population ratio 6-month change"}
 
+  - id: JTSQUL
+    name: Quits (JOLTS)
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 40
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: -1, desc: "Quits, year over year (falling quits = weakening labor demand)"}
+
+  - id: AWOTMAN
+    name: Manufacturing Overtime Hours
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: chg12m, risk: -1, desc: "Manufacturing overtime hours, 12-month change"}
+
+  - id: LNS12032194
+    name: Part-Time for Economic Reasons
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: +1, desc: "Involuntary part-time employment, year over year"}
+
   - id: JTSJOL
     name: Job Openings (JOLTS)
     category: labor
@@ -515,6 +589,31 @@ indicators:
     transforms:
       - {t: yoy,   risk: -1, desc: "Core capital-goods orders, year over year"}
       - {t: ann6m, risk: -1, desc: "Core capital-goods orders 6-month trend"}
+
+  - id: CMRMTSPL
+    name: Real Manufacturing & Trade Sales
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 60
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: yoy,   risk: -1, desc: "Real manufacturing & trade sales, year over year"}
+      - {t: ann6m, risk: -1, desc: "Real business sales 6-month trend"}
+
+  - id: ISRATIO
+    name: Business Inventories-to-Sales Ratio
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 45
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: chg12m, risk: +1, desc: "Inventories-to-sales ratio, 12-month change"}
 
   - id: RSXFS
     name: Retail Sales ex Food Services
@@ -623,6 +722,18 @@ indicators:
       - {t: yoy,    risk: -1, desc: "Vehicle sales, year over year"}
       - {t: dmax2y, risk: -1, desc: "Vehicle sales vs 2-year high"}
 
+  - id: REVOLSL
+    name: Revolving Consumer Credit
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 37
+    vintage: true
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: -1, desc: "Revolving consumer credit growth, year over year"}
+
   - id: PSAVERT
     name: Personal Saving Rate
     category: consumer
@@ -672,6 +783,18 @@ indicators:
       - {t: yoy,     risk: +1, desc: "Core CPI inflation, year over year"}
       - {t: infl_accel, risk: +1, desc: "Core inflation momentum (3m vs 12m)"}
 
+  - id: WTISPLC
+    name: WTI Crude Oil Price
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 2
+    license: public
+    transforms:
+      - {t: yoy, risk: +1, desc: "Oil price shock (WTI, year over year)"}
+
   - id: PCEPILFE
     name: Core PCE Price Index
     category: inflation
@@ -709,6 +832,19 @@ indicators:
     license: public
     transforms:
       - {t: yoy, risk: -1, desc: "Vehicle miles traveled, year over year"}
+
+  - id: TRUCKD11
+    name: Truck Tonnage Index
+    category: alt_hf
+    source: fred
+    frequency: m
+    publication_lag_days: 55
+    vintage: true
+    tier: 2
+    license: restricted
+    min_history_start: "2004-01-01"
+    transforms:
+      - {t: yoy, risk: -1, desc: "Truck tonnage, year over year"}
 
   - id: TSIFRGHT
     name: Freight Transportation Services Index

@@ -28,7 +28,7 @@ def test_config_features_have_metadata():
     for name, (ind, t) in specs.items():
         assert t.risk in (-1, 1), name
         assert len(t.desc) > 5, name
-        assert ind.frequency in ("d", "w", "m")
+        assert ind.frequency in ("d", "w", "m", "q")
         assert ind.publication_lag_days >= 0
 
 

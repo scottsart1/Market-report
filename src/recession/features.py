@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 # Periods per month by native frequency.
-_PPM = {"d": 21, "w": 13 / 3, "m": 1}
+_PPM = {"d": 21, "w": 13 / 3, "m": 1, "q": 1 / 3}
 
 
 def periods_for_months(frequency: str, months: float) -> int:

@@ -1,4 +1,4 @@
-# Model Card — U.S. Recession Probability Model v1.1.0
+# Model Card — U.S. Recession Probability Model v1.2.0
 
 **Target.** Probability that the U.S. economy *enters* an NBER recession within
 15/30/45/60/90 days, conditional on not currently being in one. Ground truth is
@@ -10,7 +10,7 @@ distinctions come from the model's hazard term structure, not from the labels.
 2026-05-01 — 2654 rows, 8
 recession onsets. Recession events observed: 1970-01-01, 1973-12-01, 1980-02-01, 1981-08-01, 1990-08-01, 2001-04-01, 2008-01-01, 2020-03-01.
 
-**Features.** 85 transformations across yield curve,
+**Features.** 99 transformations across yield curve,
 monetary policy, credit, equity markets, labor, real activity, housing,
 consumer, inflation, and non-financial/high-frequency categories (see
 `config/indicators.yaml`). Historical features are point-in-time: ALFRED
@@ -21,7 +21,7 @@ release timing everywhere.
 calibration selected out-of-sample among none/Platt/isotonic
 ({'A_yield_curve': 'none', 'B_elastic_net': 'isotonic', 'C_grad_boost': 'none', 'bl_constant': 'isotonic', 'bl_sahm': 'platt', 'bl_nfci': 'platt', 'D_ensemble': 'members'}); horizons mapped by a fitted hazard power law
 P(h) = 1 - (1 - P90)^theta_h with monotone theta ({
-15: 0.073, 30: 0.165, 45: 0.247, 60: 0.330, 90: 0.495 }), which
+15: 0.073, 30: 0.165, 45: 0.247, 60: 0.330, 90: 0.554 }), which
 enforces P15 <= P30 <= P45 <= P60 <= P90 structurally. Production model:
 **D_ensemble**, selected by average rank across Brier, log loss, calibration
 error, PR-AUC, event-detection rate and false alarms on pooled walk-forward
@@ -36,18 +36,18 @@ recession event(s) in the calibration window).
 | Model | Brier | Log loss | ROC AUC | PR AUC | ECE |
 |---|---|---|---|---|---|
 | A_yield_curve | 0.0436 | 0.1931 | 0.823 | 0.146 | 0.0424 |
-| B_elastic_net | 0.0501 | 0.2784 | 0.768 | 0.330 | 0.0759 |
-| C_grad_boost | 0.0425 | 0.1520 | 0.899 | 0.242 | 0.0458 |
-| D_ensemble | 0.0409 | 0.1507 | 0.875 | 0.325 | 0.0484 |
+| B_elastic_net | 0.0526 | 0.3020 | 0.766 | 0.283 | 0.0716 |
+| C_grad_boost | 0.0405 | 0.1455 | 0.910 | 0.249 | 0.0349 |
+| D_ensemble | 0.0408 | 0.1501 | 0.874 | 0.314 | 0.0486 |
 | bl_constant | 0.0531 | 0.2076 | 0.590 | 0.065 | 0.0924 |
 | bl_sahm | 0.0644 | 0.2708 | 0.731 | 0.109 | 0.1047 |
-| bl_nfci | 0.0434 | 0.1787 | 0.700 | 0.260 | 0.0616 |
+| bl_nfci | 0.0436 | 0.1786 | 0.699 | 0.258 | 0.0617 |
 
 **1-year horizon.** A dedicated classifier (same architecture and validation,
 purge widened to 455 days) serves the 365-day probability; it is floored at
 P90 so the full horizon chain stays monotone. Out-of-sample (calibrated):
-Brier 0.1300,
-ROC AUC 0.900,
+Brier 0.1194,
+ROC AUC 0.894,
 base rate 0.140;
 6/6
 recessions reached P1y >= 0.35 in the prior year.
@@ -56,12 +56,12 @@ recessions reached P1y >= 0.35 in the prior year.
 
 | Onset | Max P90 in prior 90d | Lead days (first P>=0.20) |
 |---|---|---|
-| 1980-02-01 | 0.97 | 364 |
-| 1981-08-01 | 0.69 | 365 |
-| 1990-08-01 | 0.03 | — |
-| 2001-04-01 | 0.22 | 128 |
-| 2008-01-01 | 0.73 | 361 |
-| 2020-03-01 | 0.01 | — |
+| 1980-02-01 | 0.99 | 343 |
+| 1981-08-01 | 0.62 | 365 |
+| 1990-08-01 | 0.02 | — |
+| 2001-04-01 | 0.23 | 135 |
+| 2008-01-01 | 0.74 | 361 |
+| 2020-03-01 | 0.03 | — |
 
 **False alarms** (sustained P90 >= 0.30 for 28+ days, no onset within 270d):
 0 episode(s) — none.

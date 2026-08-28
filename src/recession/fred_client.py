@@ -93,11 +93,13 @@ def _request(url: str, params: dict, timeout: int = 75, delays: list[int] | None
 
 
 def period_end(period: pd.Series, frequency: str) -> pd.Series:
-    """FRED dates observations at period *start* for monthly series and at the
-    week-ending date for weekly series. Return the calendar end of the period
-    the value describes."""
+    """FRED dates observations at period *start* for monthly/quarterly series
+    and at the week-ending date for weekly series. Return the calendar end of
+    the period the value describes."""
     if frequency == "m":
         return period + pd.offsets.MonthEnd(0)
+    if frequency == "q":
+        return period + pd.offsets.QuarterEnd(0)
     return pd.Series(period.values, index=period.index)  # d, w: date is the period end
 
 

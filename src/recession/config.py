@@ -27,7 +27,7 @@ CATEGORY_LABELS = {
     "alt_hf": "Alternative / High Frequency",
 }
 
-FREQ_DAYS = {"d": 1, "w": 7, "m": 31}
+FREQ_DAYS = {"d": 1, "w": 7, "m": 31, "q": 92}
 
 
 @dataclass(frozen=True)
