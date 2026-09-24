@@ -62,21 +62,31 @@ def fit_bootstrap_models(
     return fitted
 
 
+def anchored_band(ps_cal: np.ndarray, point: float) -> tuple[float, float]:
+    """10-90% range of bootstrap probabilities, rescaled so its median lands on
+    the production point estimate.
+
+    The bootstrap refits a single member model, so only its relative spread is
+    borrowed. Scaling rather than shifting keeps both edges nonnegative and
+    the point estimate inside the band at any probability level.
+    """
+    lo, med, hi = np.quantile(ps_cal, (QUANTILES[0], 0.5, QUANTILES[1]))
+    k = point / med
+    return float(np.clip(lo * k, 0.0, 1.0)), float(np.clip(hi * k, 0.0, 1.0))
+
+
 def bootstrap_band(
     boot_models: list,
     x_row: pd.DataFrame,
     calibrate_fn,
     term_structure_fn,
+    point: float,
 ) -> dict[int, tuple[float, float]]:
-    """10-90% band per horizon at the given feature row."""
+    """10-90% band per horizon: anchored in base-probability space at `point`,
+    then mapped through the (monotone) term structure to every horizon."""
     if not boot_models:
         return {}
-    ps = np.array([m.predict_proba(x_row)[0, 1] for m in boot_models])
-    ps_cal = calibrate_fn(ps)
-    lo, hi = np.quantile(ps_cal, QUANTILES)
-    band = {}
-    for p_edge, key in ((lo, "lo"), (hi, "hi")):
-        ts = term_structure_fn(np.array([p_edge]))
-        for h, v in ts.items():
-            band.setdefault(h, {})[key] = float(v[0])
-    return {h: (d["lo"], d["hi"]) for h, d in band.items()}
+    ps_cal = calibrate_fn(np.array([m.predict_proba(x_row)[0, 1] for m in boot_models]))
+    lo, hi = anchored_band(ps_cal, point)
+    ts_lo, ts_hi = term_structure_fn(np.array([lo])), term_structure_fn(np.array([hi]))
+    return {h: (float(ts_lo[h][0]), float(ts_hi[h][0])) for h in ts_lo}

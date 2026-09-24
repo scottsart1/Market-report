@@ -143,9 +143,11 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         "models": fitted,
         "calibrators": calibrators,
         "calibrator_choice": bt.calibrator_choice,
+        "calibrator_applied": {m: c.name for m, c in calibrators.items()},
         "models_long": models_long,
         "calibrators_long": calibrators_long,
         "calibrator_choice_long": long_bt["calibrator_choice"],
+        "calibrator_applied_long": {m: c.name for m, c in calibrators_long.items()},
         "long_horizon": LONG_H,
         "theta": bt.theta,
         "feature_cols": feature_cols,
@@ -254,8 +256,8 @@ first-release values where vintages exist, and configured publication lags for
 release timing everywhere.
 
 **Methodology.** Base classifier for the 90-day onset window; probability
-calibration selected out-of-sample among none/Platt/isotonic
-({bundle['calibrator_choice']}); horizons mapped by a fitted hazard power law
+calibration selected out-of-sample among none/Platt/smoothed isotonic
+({bundle['calibrator_choice']}; applied in production: {bundle['calibrator_applied']}, 1-year {bundle['calibrator_applied_long']} — a fit that carries no ranking information on the calibration window falls back to the raw score); horizons mapped by a fitted hazard power law
 P(h) = 1 - (1 - P90)^theta_h with monotone theta ({{
 {', '.join(f"{h}: {t:.3f}" for h, t in bundle['theta'].items())} }}), which
 enforces P15 <= P30 <= P45 <= P60 <= P90 structurally. Production model:

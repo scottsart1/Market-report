@@ -29,6 +29,11 @@ from sklearn.linear_model import LogisticRegression
 from .labels import HORIZONS
 
 EPS = 1e-6
+# A calibration window can hold as little as one recession. A Platt fit that
+# flattens the score's logit dispersion by more than 4x (or inverts it) is
+# asserting the model has no ranking skill, which that window cannot
+# establish; such a fit is rejected in favor of the uncalibrated score.
+MIN_PLATT_SLOPE = 0.25
 
 
 def _clip(p: np.ndarray) -> np.ndarray:
@@ -43,6 +48,9 @@ class IdentityCalibrator:
 
     def transform(self, p):
         return _clip(p)
+
+    def is_informative(self) -> bool:
+        return True
 
 
 class PlattCalibrator:
@@ -59,24 +67,46 @@ class PlattCalibrator:
         z = np.log(_clip(p) / (1 - _clip(p))).reshape(-1, 1)
         return _clip(self.lr_.predict_proba(z)[:, 1])
 
+    def is_informative(self) -> bool:
+        return float(self.lr_.coef_[0][0]) >= MIN_PLATT_SLOPE
 
-class IsotonicCalibrator:
-    name = "isotonic"
+
+class SmoothIsotonicCalibrator:
+    """Isotonic calibration interpolated between block centers.
+
+    Plain isotonic regression is a step function: with few positive events
+    its blocks are wide, so a daily monitor's headline sits frozen on one
+    step while the model score moves, then jumps at block edges. This keeps
+    the pool-adjacent-violators fit but anchors each block's value at the
+    mean score of the observations in that block and interpolates linearly
+    between anchors, giving a continuous, nondecreasing map.
+    """
+
+    name = "isotonic_smooth"
 
     def fit(self, p, y):
-        self.iso_ = IsotonicRegression(
+        x = _clip(p)
+        iso = IsotonicRegression(
             y_min=EPS, y_max=1 - EPS, out_of_bounds="clip", increasing=True
-        ).fit(_clip(p), np.asarray(y, dtype=float))
+        ).fit(x, np.asarray(y, dtype=float))
+        blocks = pd.DataFrame({"x": x, "v": iso.predict(x)}).groupby("v")["x"].mean()
+        self.knots_x_ = blocks.to_numpy()
+        self.knots_y_ = blocks.index.to_numpy()
+        order = np.argsort(self.knots_x_)
+        self.knots_x_, self.knots_y_ = self.knots_x_[order], self.knots_y_[order]
         return self
 
     def transform(self, p):
-        return _clip(self.iso_.predict(_clip(p)))
+        return _clip(np.interp(_clip(p), self.knots_x_, self.knots_y_))
+
+    def is_informative(self) -> bool:
+        return len(self.knots_y_) >= 2
 
 
 CALIBRATORS = {
     "none": IdentityCalibrator,
     "platt": PlattCalibrator,
-    "isotonic": IsotonicCalibrator,
+    "isotonic_smooth": SmoothIsotonicCalibrator,
 }
 
 

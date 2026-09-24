@@ -67,11 +67,14 @@ class ProbitModel(BaseEstimator, ClassifierMixin):
 
 
 class ConstantModel(BaseEstimator, ClassifierMixin):
-    """Baseline: unconditional (weighted) historical event frequency."""
+    """Baseline: unconditional historical event frequency.
+
+    Deliberately ignores sample_weight: under the class-balancing weights the
+    weighted mean is 0.5, which is not the historical frequency.
+    """
 
     def fit(self, X, y, sample_weight=None):
-        w = np.ones(len(y)) if sample_weight is None else np.asarray(sample_weight)
-        self.p_ = float(np.average(np.asarray(y, dtype=float), weights=w))
+        self.p_ = float(np.mean(np.asarray(y, dtype=float)))
         self.classes_ = np.array([0, 1])
         return self
 

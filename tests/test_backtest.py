@@ -73,3 +73,11 @@ def test_event_weights_balance():
     w_e2 = w[186:189].sum()
     assert np.isclose(w_e1, w_e2, rtol=1e-6), "each recession event carries equal total weight"
     assert np.isclose(w.mean(), 1.0, rtol=1e-6)
+
+
+def test_constant_baseline_is_historical_frequency():
+    from recession.models import ConstantModel
+    y = np.array([0] * 97 + [1] * 3)
+    w = training_weights(y, pd.Series([pd.NaT] * 97 + [pd.Timestamp("2001-04-01")] * 3))
+    p = ConstantModel().fit(None, y, sample_weight=w).predict_proba(np.zeros((1, 1)))[0, 1]
+    assert np.isclose(p, 0.03)

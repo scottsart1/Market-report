@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 from recession.horizon import (
-    HazardTermStructure, IsotonicCalibrator, PlattCalibrator,
+    HazardTermStructure, PlattCalibrator, SmoothIsotonicCalibrator,
 )
 from recession.labels import HORIZONS
 
@@ -43,8 +43,32 @@ def test_default_theta_matches_constant_hazard():
 def test_calibrators_bounded_and_monotone():
     p, lab = _fake_oos()
     y = lab["y90"].to_numpy()
-    for cal in (PlattCalibrator().fit(p, y), IsotonicCalibrator().fit(p, y)):
+    for cal in (PlattCalibrator().fit(p, y), SmoothIsotonicCalibrator().fit(p, y)):
         grid = np.linspace(0.001, 0.999, 200)
         out = cal.transform(grid)
         assert ((out > 0) & (out < 1)).all()
         assert (np.diff(out) >= -1e-9).all(), "calibration must preserve ranking"
+
+
+def test_smooth_isotonic_has_no_plateaus_or_cliffs():
+    """A daily monitor must respond to small score moves and must not jump
+    at arbitrary block edges (the failure mode of step isotonic)."""
+    p, lab = _fake_oos(n=3000, seed=7)
+    cal = SmoothIsotonicCalibrator().fit(p, lab["y90"].to_numpy())
+    lo, hi = cal.knots_x_[0], cal.knots_x_[-1]
+    grid = np.linspace(lo, hi, 400)
+    out = cal.transform(grid)
+    assert (np.diff(out) >= -1e-12).all()
+    # between the outer knots, distinct scores map to distinct probabilities
+    assert np.unique(out.round(10)).size > 0.9 * len(grid)
+    # continuity: no single small step in score moves the output by much
+    assert np.abs(np.diff(out)).max() < 0.05
+
+
+def test_uninformative_platt_is_rejected():
+    rng = np.random.default_rng(3)
+    p = np.clip(rng.beta(1.2, 8, 4000), 1e-4, 1 - 1e-4)
+    informative = PlattCalibrator().fit(p, (rng.random(p.size) < p).astype(int))
+    unrelated = PlattCalibrator().fit(p, (rng.random(p.size) < 0.1).astype(int))
+    assert informative.is_informative()
+    assert not unrelated.is_informative()

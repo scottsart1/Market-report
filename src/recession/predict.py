@@ -23,7 +23,7 @@ from .pipeline import (
     refresh_summary, weekly_grid,
 )
 from .train import BUNDLE_PATH
-from .uncertainty import bootstrap_band
+from .uncertainty import anchored_band, bootstrap_band
 
 log = get_logger(__name__)
 
@@ -202,14 +202,10 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
     cal_b = bundle["calibrators"]["B_elastic_net"]
     band = bootstrap_band(
         bundle.get("boot_models", []), x_today,
-        calibrate_fn=lambda p: cal_b.transform(p),
+        calibrate_fn=cal_b.transform,
         term_structure_fn=ts.term_structure,
+        point=p90_today,
     )
-    # Center the bootstrap band on the production probability (band width from
-    # the interpretable member; documented approximation when prod != B).
-    if band and prod != "B_elastic_net":
-        shift = probs[90] - float(np.mean(band[90]))
-        band = {h: (max(0.0, lo + shift), min(1.0, hi + shift)) for h, (lo, hi) in band.items()}
 
     # 1-year band from the dedicated long-horizon bootstrap
     if p_long_daily is not None and bundle.get("boot_models_long"):
@@ -217,9 +213,7 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
         ps = cal_bl.transform(np.array(
             [m.predict_proba(x_today)[0, 1] for m in bundle["boot_models_long"]]
         ))
-        lo, hi = (float(q) for q in np.quantile(ps, (0.10, 0.90)))
-        shift = probs[lh] - (lo + hi) / 2
-        band[lh] = (max(0.0, lo + shift), min(1.0, hi + shift))
+        band[lh] = anchored_band(ps, probs[lh])
 
     # ------------------------------------------------------- categories/health
     scores = category_scores(Xw.reindex(columns=feature_cols), cfg)

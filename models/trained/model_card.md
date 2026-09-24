@@ -18,10 +18,10 @@ first-release values where vintages exist, and configured publication lags for
 release timing everywhere.
 
 **Methodology.** Base classifier for the 90-day onset window; probability
-calibration selected out-of-sample among none/Platt/isotonic
-({'A_yield_curve': 'none', 'B_elastic_net': 'isotonic', 'C_grad_boost': 'none', 'bl_constant': 'isotonic', 'bl_sahm': 'platt', 'bl_nfci': 'platt', 'D_ensemble': 'members'}); horizons mapped by a fitted hazard power law
+calibration selected out-of-sample among none/Platt/smoothed isotonic
+({'A_yield_curve': 'none', 'B_elastic_net': 'isotonic_smooth', 'C_grad_boost': 'none', 'bl_constant': 'none', 'bl_sahm': 'isotonic_smooth', 'bl_nfci': 'platt', 'D_ensemble': 'members'}; applied in production: {'A_yield_curve': 'none', 'B_elastic_net': 'isotonic_smooth', 'C_grad_boost': 'none', 'bl_sahm': 'isotonic_smooth', 'bl_nfci': 'none', 'bl_constant': 'none'}, 1-year {'B_elastic_net': 'isotonic_smooth', 'C_grad_boost': 'none'} — a fit that carries no ranking information on the calibration window falls back to the raw score); horizons mapped by a fitted hazard power law
 P(h) = 1 - (1 - P90)^theta_h with monotone theta ({
-15: 0.073, 30: 0.165, 45: 0.247, 60: 0.330, 90: 0.554 }), which
+15: 0.073, 30: 0.165, 45: 0.247, 60: 0.330, 90: 0.495 }), which
 enforces P15 <= P30 <= P45 <= P60 <= P90 structurally. Production model:
 **D_ensemble**, selected by average rank across Brier, log loss, calibration
 error, PR-AUC, event-detection rate and false alarms on pooled walk-forward
@@ -36,20 +36,20 @@ recession event(s) in the calibration window).
 | Model | Brier | Log loss | ROC AUC | PR AUC | ECE |
 |---|---|---|---|---|---|
 | A_yield_curve | 0.0435 | 0.1929 | 0.822 | 0.146 | 0.0422 |
-| B_elastic_net | 0.0526 | 0.3017 | 0.766 | 0.283 | 0.0717 |
+| B_elastic_net | 0.0523 | 0.2515 | 0.803 | 0.291 | 0.0766 |
 | C_grad_boost | 0.0403 | 0.1443 | 0.910 | 0.251 | 0.0347 |
-| D_ensemble | 0.0407 | 0.1496 | 0.875 | 0.314 | 0.0488 |
-| bl_constant | 0.0531 | 0.2073 | 0.591 | 0.065 | 0.0922 |
-| bl_sahm | 0.0643 | 0.2703 | 0.731 | 0.109 | 0.1045 |
-| bl_nfci | 0.0435 | 0.1783 | 0.699 | 0.258 | 0.0616 |
+| D_ensemble | 0.0406 | 0.1460 | 0.857 | 0.309 | 0.0517 |
+| bl_constant | 0.0329 | 0.1507 | 0.658 | 0.068 | 0.0275 |
+| bl_sahm | 0.0713 | 0.2725 | 0.780 | 0.099 | 0.1103 |
+| bl_nfci | 0.0519 | 0.2114 | 0.696 | 0.253 | 0.0931 |
 
 **1-year horizon.** A dedicated classifier (same architecture and validation,
 purge widened to 455 days) serves the 365-day probability; it is floored at
 P90 so the full horizon chain stays monotone. Out-of-sample (calibrated):
-Brier 0.1204,
-ROC AUC 0.893,
+Brier 0.1214,
+ROC AUC 0.879,
 base rate 0.140;
-6/6
+5/6
 recessions reached P1y >= 0.35 in the prior year.
 
 **Recession-by-recession (out-of-sample, production model)**
@@ -61,7 +61,7 @@ recessions reached P1y >= 0.35 in the prior year.
 | 1990-08-01 | 0.02 | — |
 | 2001-04-01 | 0.23 | 135 |
 | 2008-01-01 | 0.74 | 361 |
-| 2020-03-01 | 0.03 | — |
+| 2020-03-01 | 0.04 | — |
 
 **False alarms** (sustained P90 >= 0.30 for 28+ days, no onset within 270d):
 0 episode(s) — none.

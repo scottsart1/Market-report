@@ -16,7 +16,7 @@ Validation design:
   fitted on the first 75%, the calibrator on the (purged) last 25%, and the
   fold's test predictions run through that pair. No future data, and no
   mixing of score scales across eras. The calibration method (none / Platt /
-  isotonic) is chosen by pooled out-of-sample Brier + log loss.
+  smoothed isotonic) is chosen by pooled out-of-sample Brier + log loss.
 * **Selection is multi-criteria.** With a ~2.5% base rate, Brier score alone
   rewards a model that never predicts recessions. Production selection uses
   an average rank across calibration (Brier, ECE, log loss), discrimination
@@ -147,7 +147,9 @@ def fit_fold_calibrators(
     proto, X, y90, labels, fit_idx, cal_idx
 ) -> tuple[object, dict[str, object]]:
     """Fit the inner model on the fit split and one calibrator per method on
-    the calibration split. Falls back to identity when positives are scarce."""
+    the calibration split. Falls back to identity when positives are scarce;
+    a method whose fit carries no ranking information is omitted, so callers
+    fall back to identity for it."""
     w_fit = training_weights(y90.loc[fit_idx].to_numpy(), labels.loc[fit_idx, "next_onset"])
     inner = clone(proto).fit(X.loc[fit_idx], y90.loc[fit_idx].to_numpy(), sample_weight=w_fit)
     cals: dict[str, object] = {"none": IdentityCalibrator()}
@@ -158,9 +160,14 @@ def fit_fold_calibrators(
             if name == "none":
                 continue
             try:
-                cals[name] = cls().fit(p_cal_raw, y_cal)
+                cal = cls().fit(p_cal_raw, y_cal)
             except Exception as exc:  # pragma: no cover
                 log.warning("Calibrator %s failed on fold split: %s", name, exc)
+                continue
+            if cal.is_informative():
+                cals[name] = cal
+            else:
+                log.info("Calibrator %s rejected as uninformative on this split", name)
     return inner, cals
 
 
@@ -221,7 +228,7 @@ def run_backtest(
     calibrator_choice: dict[str, str] = {}
     for mname in base_names:
         scores = {}
-        for cname in ("none", "platt", "isotonic"):
+        for cname in CALIBRATORS:
             col = f"p_{cname}_{mname}"
             if col not in oos.columns:
                 continue
@@ -349,7 +356,8 @@ def run_backtest(
         reliability[m] = rows
 
     # keep the persisted frame tidy: drop per-method intermediate columns
-    drop = [c for c in oos.columns if c.startswith(("p_none_", "p_platt_", "p_isotonic_"))]
+    method_prefixes = tuple(f"p_{m}_" for m in CALIBRATORS)
+    drop = [c for c in oos.columns if c.startswith(method_prefixes)]
     oos = oos.drop(columns=drop)
 
     return BacktestResult(
@@ -406,7 +414,7 @@ def run_long_backtest(
     calibrator_choice: dict[str, str] = {}
     for mname in protos:
         scores = {}
-        for cname in ("none", "platt", "isotonic"):
+        for cname in CALIBRATORS:
             col = f"p_{cname}_{mname}"
             if col not in oos.columns:
                 continue
