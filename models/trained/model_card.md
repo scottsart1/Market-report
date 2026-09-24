@@ -7,7 +7,7 @@ of the first recession month. NBER dating is monthly; sub-monthly horizon
 distinctions come from the model's hazard term structure, not from the labels.
 
 **Training period.** Weekly (Friday) observations 1968-06-01 to
-2026-05-01 — 2654 rows, 8
+2026-05-29 — 2658 rows, 8
 recession onsets. Recession events observed: 1970-01-01, 1973-12-01, 1980-02-01, 1981-08-01, 1990-08-01, 2001-04-01, 2008-01-01, 2020-03-01.
 
 **Features.** 99 transformations across yield curve,
@@ -27,27 +27,27 @@ enforces P15 <= P30 <= P45 <= P60 <= P90 structurally. Production model:
 error, PR-AUC, event-detection rate and false alarms on pooled walk-forward
 out-of-sample predictions. The production predictor repeats the exact
 construction the walk-forward validated: model fitted on eligible history
-through 2013-06-14, calibrator fitted on the purged tail
-2013-12-13 → 2026-05-01 (1
+through 2013-07-05, calibrator fitted on the purged tail
+2014-01-03 → 2026-05-29 (1
 recession event(s) in the calibration window).
 
 **Out-of-sample performance** (pooled walk-forward OOS, calibrated inside each fold):
 
 | Model | Brier | Log loss | ROC AUC | PR AUC | ECE |
 |---|---|---|---|---|---|
-| A_yield_curve | 0.0436 | 0.1931 | 0.823 | 0.146 | 0.0424 |
-| B_elastic_net | 0.0526 | 0.3020 | 0.766 | 0.283 | 0.0716 |
-| C_grad_boost | 0.0405 | 0.1455 | 0.910 | 0.249 | 0.0349 |
-| D_ensemble | 0.0408 | 0.1501 | 0.874 | 0.314 | 0.0486 |
-| bl_constant | 0.0531 | 0.2076 | 0.590 | 0.065 | 0.0924 |
-| bl_sahm | 0.0644 | 0.2708 | 0.731 | 0.109 | 0.1047 |
-| bl_nfci | 0.0436 | 0.1786 | 0.699 | 0.258 | 0.0617 |
+| A_yield_curve | 0.0435 | 0.1929 | 0.822 | 0.146 | 0.0422 |
+| B_elastic_net | 0.0526 | 0.3017 | 0.766 | 0.283 | 0.0717 |
+| C_grad_boost | 0.0403 | 0.1443 | 0.910 | 0.251 | 0.0347 |
+| D_ensemble | 0.0407 | 0.1496 | 0.875 | 0.314 | 0.0488 |
+| bl_constant | 0.0531 | 0.2073 | 0.591 | 0.065 | 0.0922 |
+| bl_sahm | 0.0643 | 0.2703 | 0.731 | 0.109 | 0.1045 |
+| bl_nfci | 0.0435 | 0.1783 | 0.699 | 0.258 | 0.0616 |
 
 **1-year horizon.** A dedicated classifier (same architecture and validation,
 purge widened to 455 days) serves the 365-day probability; it is floored at
 P90 so the full horizon chain stays monotone. Out-of-sample (calibrated):
-Brier 0.1194,
-ROC AUC 0.894,
+Brier 0.1204,
+ROC AUC 0.893,
 base rate 0.140;
 6/6
 recessions reached P1y >= 0.35 in the prior year.
