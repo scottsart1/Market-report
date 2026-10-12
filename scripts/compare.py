@@ -47,10 +47,45 @@ def fmt(v, nd=4):
     return "—" if v is None or (isinstance(v, float) and np.isnan(v)) else f"{v:.{nd}f}"
 
 
+def paired_bootstrap(ref: str, other: str, model: str, horizon: str = "90", n_boot: int = 2000,
+                     block: int = 52, seed: int = 0) -> dict:
+    """Moving-block bootstrap of the mean Brier difference (other - ref).
+
+    Weekly rows are strongly autocorrelated and the positives cluster in ~8
+    episodes, so a plain t-test overstates certainty; 1-year blocks keep
+    whole episodes together. Returns the point difference, a 90% interval
+    and the share of resamples in which `other` is better.
+    """
+    if horizon == "90":
+        a = pd.read_parquet(EXP_DIR / f"{ref}.oos.parquet")
+        b = pd.read_parquet(EXP_DIR / f"{other}.oos.parquet")
+        col, ycol, elig = f"p_cal_{model}", "y90", "eligible"
+    else:
+        a = pd.read_parquet(EXP_DIR / f"{ref}.long.parquet")
+        b = pd.read_parquet(EXP_DIR / f"{other}.long.parquet")
+        col, ycol, elig = "p_cal_long", "y365", "eligible_long"
+    idx = a.index.intersection(b.index)
+    a, b = a.loc[idx], b.loc[idx]
+    ok = a[elig].astype(bool) & a[col].notna() & b[col].notna()
+    y = a.loc[ok, ycol].astype(float).to_numpy()
+    d = (b.loc[ok, col].to_numpy() - y) ** 2 - (a.loc[ok, col].to_numpy() - y) ** 2
+    n = len(d)
+    rng = np.random.default_rng(seed)
+    starts = rng.integers(0, max(n - block, 1), size=(n_boot, int(np.ceil(n / block))))
+    means = np.empty(n_boot)
+    for i in range(n_boot):
+        pick = np.concatenate([np.arange(s, min(s + block, n)) for s in starts[i]])[:n]
+        means[i] = d[pick].mean()
+    return {"n": n, "diff": float(d.mean()), "ci90": [float(np.quantile(means, 0.05)), float(np.quantile(means, 0.95))],
+            "share_better": float((means < 0).mean())}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*")
     ap.add_argument("--model", default="D_ensemble")
+    ap.add_argument("--paired", action="store_true",
+                    help="block-bootstrap the Brier difference of each experiment vs the first")
     args = ap.parse_args()
     exps = load(args.names)
     m = args.model
@@ -79,6 +114,19 @@ def main() -> None:
             d = fb - base
             print(f"| {e['name']} | " + " | ".join(fmt(x) for x in d) +
                   f" | {int((d < 0).sum())}/{int(d.notna().sum())} |")
+
+    if args.paired and len(exps) > 1:
+        print(f"\nBlock-bootstrap Brier difference vs `{ref}` (negative = better; 52-week blocks):\n")
+        print("| experiment | horizon | n rows | diff | 90% interval | share of resamples better |")
+        print("|---|---|---|---|---|---|")
+        for e in exps[1:]:
+            for hz in ("90", "365"):
+                try:
+                    r = paired_bootstrap(ref, e["name"], m, hz)
+                except FileNotFoundError:
+                    continue
+                print(f"| {e['name']} | {hz}d | {r['n']} | {r['diff']:+.5f} | "
+                      f"[{r['ci90'][0]:+.5f}, {r['ci90'][1]:+.5f}] | {r['share_better']:.0%} |")
 
 
 if __name__ == "__main__":
