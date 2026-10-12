@@ -37,13 +37,16 @@ class TransformSpec:
     desc: str
 
 
+FETCHED_SOURCES = ("fred", "url")  # sources that are downloaded (vs derived)
+
+
 @dataclass(frozen=True)
 class Indicator:
     id: str
     name: str
     category: str
-    source: str  # "fred" | "derived"
-    frequency: str  # "d" | "w" | "m"
+    source: str  # "fred" | "url" | "derived"
+    frequency: str  # "d" | "w" | "m" | "q"
     publication_lag_days: int
     vintage: bool
     tier: int
@@ -53,6 +56,15 @@ class Indicator:
     inputs: tuple[str, ...] = ()
     enabled: bool = True
     min_history_start: str | None = None
+    # source == "url": a public CSV/XLSX file (e.g. a Fed research dataset)
+    url: str | None = None
+    url_date_col: str = "date"
+    url_value_col: str | None = None
+    url_sheet: str | None = None
+
+    @property
+    def fetched(self) -> bool:
+        return self.source in FETCHED_SOURCES
 
     def feature_names(self) -> list[str]:
         return [f"{self.id}__{t.code}" for t in self.transforms]
@@ -100,6 +112,10 @@ def _parse_indicator(d: dict) -> Indicator:
         inputs=tuple(d.get("inputs", []) or []),
         enabled=bool(d.get("enabled", True)),
         min_history_start=d.get("min_history_start"),
+        url=d.get("url"),
+        url_date_col=d.get("url_date_col", "date"),
+        url_value_col=d.get("url_value_col"),
+        url_sheet=d.get("url_sheet"),
     )
 
 
@@ -116,8 +132,14 @@ def load_config(path: str | Path = CONFIG_PATH) -> IndicatorConfig:
     for i in inds:
         if i.category not in CATEGORIES:
             raise ValueError(f"Unknown category {i.category!r} for {i.id}")
+        if i.source not in (*FETCHED_SOURCES, "derived"):
+            raise ValueError(f"Unknown source {i.source!r} for {i.id}")
         if i.source == "derived" and not i.inputs:
             raise ValueError(f"Derived indicator {i.id} needs inputs")
+        if i.source == "url" and not (i.url and i.url_value_col):
+            raise ValueError(f"URL indicator {i.id} needs url and url_value_col")
+        if i.source == "url" and i.vintage:
+            raise ValueError(f"URL indicator {i.id} cannot be vintage: no ALFRED history")
         # The recession label must never appear as a predictor input.
         if label_id in (i.id, *i.inputs):
             raise ValueError(f"Label series {label_id} may not be used as an indicator")

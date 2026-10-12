@@ -361,3 +361,73 @@ def fetch_series(
     if want_vintage and "first_release" not in out and "latest" in out:
         out["latest"].meta.setdefault("vintage_fallback", True)
     return out
+
+
+# ------------------------------------------------------------ URL datasets
+
+def _read_url_table(url: str, sheet: str | None) -> pd.DataFrame:
+    resp = _request(url, {}, timeout=120)
+    if url.lower().split("?")[0].endswith((".xlsx", ".xls")):
+        return pd.read_excel(io.BytesIO(resp.content), sheet_name=sheet or 0)
+    return pd.read_csv(io.StringIO(resp.text))
+
+
+def fetch_url_series(
+    series_id: str,
+    url: str,
+    frequency: str,
+    lag_days: int,
+    date_col: str = "date",
+    value_col: str | None = None,
+    sheet: str | None = None,
+    ttl_hours: float = 12.0,
+    offline: bool = False,
+) -> dict[str, SeriesResult]:
+    """Fetch a public CSV/XLSX dataset (e.g. a Fed research series).
+
+    Such files carry no vintages: the whole history is the latest revision,
+    so availability is period_end + lag and the series is flagged like a
+    keyless FRED fallback (``vintage_fallback``) in Data Health.
+    """
+    cached = _read_cache(series_id, "latest")
+    age = _cache_age_hours(series_id, "latest")
+    if cached is not None and (offline or (age is not None and age < ttl_hours)):
+        return {"latest": cached}
+    try:
+        raw = _read_url_table(url, sheet)
+        cols = {c.strip().lower(): c for c in map(str, raw.columns)}
+        dc, vc = cols.get(date_col.lower()), cols.get((value_col or "").lower())
+        if dc is None or vc is None:
+            raise ValueError(f"{series_id}: columns {date_col!r}/{value_col!r} not in {list(raw.columns)}")
+        df = pd.DataFrame({
+            "period": pd.to_datetime(raw[dc], errors="coerce"),
+            "value": pd.to_numeric(raw[vc], errors="coerce"),
+        })
+        df = _validate_obs(df, series_id)
+        if frequency in ("m", "q"):  # normalize to period start like FRED
+            df["period"] = df["period"].dt.to_period("M" if frequency == "m" else "Q").dt.to_timestamp()
+        df = df.groupby("period", as_index=False)["value"].last()
+        df["avail"] = _availability_from_lag(df, frequency, lag_days)
+        res = SeriesResult(
+            series_id, "latest", df[["period", "value", "avail"]],
+            meta={
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "source_detail": "url_file",
+                "url": url,
+                "n_obs": len(df),
+                "first_period": str(df["period"].min()) if len(df) else None,
+                "last_period": str(df["period"].max()) if len(df) else None,
+                "vintage_fallback": True,
+            },
+        )
+        _write_cache(res)
+        return {"latest": res}
+    except Exception as exc:
+        log.error("Fetch failed for %s (url): %s", series_id, exc)
+        if cached is not None:
+            cached.fetch_error = str(exc)
+            return {"latest": cached}
+        return {"latest": SeriesResult(
+            series_id, "latest", pd.DataFrame(columns=["period", "value", "avail"]),
+            meta={}, fetch_error=str(exc),
+        )}

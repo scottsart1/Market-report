@@ -19,7 +19,7 @@ import pandas as pd
 
 from .config import FREQ_DAYS, Indicator, IndicatorConfig, load_config
 from .features import build_feature_panel, periods_for_months, transform_frame
-from .fred_client import SeriesResult, fetch_series, period_end
+from .fred_client import SeriesResult, fetch_series, fetch_url_series, period_end
 from .paths import get_logger
 
 log = get_logger(__name__)
@@ -34,11 +34,18 @@ def fetch_all(
     ttl_hours: float = 12.0,
     offline: bool = False,
 ) -> dict[str, dict[str, SeriesResult]]:
-    """Fetch every FRED-sourced series (indicators + label)."""
+    """Fetch every downloaded series (FRED and URL indicators + label)."""
     cfg = cfg or load_config()
     fetched: dict[str, dict[str, SeriesResult]] = {}
     for ind in cfg.indicators:
-        if ind.source != "fred" or not ind.enabled:
+        if not ind.fetched or not ind.enabled:
+            continue
+        if ind.source == "url":
+            fetched[ind.id] = fetch_url_series(
+                ind.id, ind.url, ind.frequency, ind.publication_lag_days,
+                date_col=ind.url_date_col, value_col=ind.url_value_col, sheet=ind.url_sheet,
+                ttl_hours=ttl_hours, offline=offline,
+            )
             continue
         fetched[ind.id] = fetch_series(
             ind.id, ind.frequency, ind.publication_lag_days,
@@ -127,7 +134,7 @@ def build_series_frames(
     unavailable: list[str] = []
 
     for ind in cfg.indicators:
-        if ind.source != "fred" or not ind.enabled:
+        if not ind.fetched or not ind.enabled:
             continue
         res = fetched.get(ind.id, {})
         if not _series_ok(ind, res):
@@ -215,7 +222,7 @@ def data_health(
     now = now or pd.Timestamp.now()
     rows = []
     for ind in cfg.indicators:
-        if ind.source != "fred" or not ind.enabled:
+        if not ind.fetched or not ind.enabled:
             continue
         res = fetched.get(ind.id, {})
         latest = res.get("latest")
