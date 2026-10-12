@@ -21,6 +21,7 @@ import pandas as pd
 
 from recession.paths import MODELS_DIR
 from recession.predict import run_prediction
+from recession.timeline import stitch_timeline
 
 
 def build_payload(ttl_hours: float = 1.0, offline: bool = False) -> dict:
@@ -30,9 +31,10 @@ def build_payload(ttl_hours: float = 1.0, offline: bool = False) -> dict:
     oos = pd.read_parquet(MODELS_DIR / "oos_predictions.parquet")
     oos.index = pd.to_datetime(oos.index)
     results = json.loads((MODELS_DIR / "backtest_results.json").read_text())
+    tl = stitch_timeline(oos, out["curve"], pred["train_end"], out.get("recession_calendar"))
 
     spans, start, prev = [], None, None
-    for t, v in oos["in_recession"].astype(bool).items():
+    for t, v in tl["in_recession"].items():
         if v and start is None:
             start = t
         if not v and start is not None:
@@ -42,14 +44,16 @@ def build_payload(ttl_hours: float = 1.0, offline: bool = False) -> dict:
     if start is not None:
         spans.append([str(start.date()), str(prev.date())])
 
-    hist_h = [h for h in (15, 30, 45, 60, 90, 365) if f"p{h}" in oos.columns]
+    hist_h = [h for h in (15, 30, 45, 60, 90, 365) if f"p{h}" in tl.columns]
+    live_dates = tl.index[tl["source"] == "live"]
     hist = {
-        "dates": [str(d.date()) for d in oos.index],
+        "dates": [str(d.date()) for d in tl.index],
         "horizons": hist_h,
         "spans": spans,
+        "live_from": str(live_dates[0].date()) if len(live_dates) else None,
     }
     for h in hist_h:
-        hist[f"p{h}"] = [None if pd.isna(v) else round(float(v), 5) for v in oos[f"p{h}"]]
+        hist[f"p{h}"] = [None if pd.isna(v) else round(float(v), 5) for v in tl[f"p{h}"]]
 
     health = out["health"][
         ["name", "category", "tier", "source", "vintage_mode", "last_period", "days_stale", "status"]

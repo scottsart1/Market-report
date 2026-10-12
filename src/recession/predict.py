@@ -154,8 +154,11 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
     feature_cols = bundle["feature_cols"]
     X_all = panel_now.reindex(columns=feature_cols)
 
-    # Retrospective daily curve (current model, latest data) for deltas/chart.
-    tail = X_all.tail(1100)  # ~4 years of business days
+    # Retrospective daily curve (current model, latest data) for deltas and the
+    # live part of the history chart: ~4 years of business days, and never
+    # less than everything since the training cutoff.
+    start = min(X_all.index[max(len(X_all) - 1100, 0)], pd.Timestamp(bundle["train_end"]))
+    tail = X_all[X_all.index >= start]
     _, p90_daily = bundle_p90_raw_cal(bundle, tail)
     ts = _term_structure(bundle)
     curve = pd.DataFrame(
@@ -283,6 +286,7 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
     return {
         "prediction": pred,
         "curve": curve,
+        "recession_calendar": cal_obj,
         "category_scores": scores,
         "category_summary": cat_summary,
         "health": health,

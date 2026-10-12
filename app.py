@@ -20,6 +20,7 @@ from recession.history import load_history
 from recession.labels import HORIZONS
 from recession.paths import MODELS_DIR
 from recession.predict import load_bundle, run_prediction
+from recession.timeline import stitch_timeline
 
 # ----------------------------------------------------------------- palette --
 BLUE = "#2a78d6"      # primary series
@@ -336,18 +337,20 @@ if oos is not None:
             key="hsel",
         )
 
-    end_date = oos.index.max()
-    spans_all = recession_spans(oos["in_recession"])
+    # backtest up to the training cutoff, then the production model through today
+    tl = stitch_timeline(oos, curve, pred["train_end"], out.get("recession_calendar"))
+    end_date = tl.index.max()
+    spans_all = recession_spans(tl["in_recession"])
     q_start = pd.Timestamp(end_date.year, 3 * ((end_date.month - 1) // 3) + 1, 1)
     range_starts = {
-        "Full history": oos.index.min(),
-        "Since last recession": (spans_all[-1][1] + pd.Timedelta(days=1)) if spans_all else oos.index.min(),
+        "Full history": tl.index.min(),
+        "Since last recession": (spans_all[-1][1] + pd.Timedelta(days=1)) if spans_all else tl.index.min(),
         "Last 12 months": end_date - pd.Timedelta(days=365),
         "YTD": pd.Timestamp(end_date.year, 1, 1),
         "Last 2 quarters": q_start - pd.offsets.MonthBegin(3),
         "This quarter": q_start,
     }
-    view = oos[oos.index >= range_starts[range_choice]]
+    view = tl[tl.index >= range_starts[range_choice]]
 
     fig = go.Figure()
     for a, b in recession_spans(view["in_recession"]):
@@ -358,11 +361,24 @@ if oos is not None:
     for h in horder:
         if f"{h}D" not in hsel or f"p{h}" not in view.columns:
             continue
-        fig.add_trace(go.Scatter(
-            x=view.index, y=view[f"p{h}"] * 100, mode="lines",
-            line=dict(color=colors[h], width=2),
-            name="1-year" if h == 365 else f"{h}-day",
-        ))
+        # separate traces so no line bridges the two models
+        for src in ("backtest", "live"):
+            seg = view[view["source"] == src]
+            if seg.empty:
+                continue
+            fig.add_trace(go.Scatter(
+                x=seg.index, y=seg[f"p{h}"] * 100, mode="lines",
+                line=dict(color=colors[h], width=2),
+                name="1-year" if h == 365 else f"{h}-day",
+                legendgroup=f"h{h}",
+                showlegend=bool(src == "backtest" or view["source"].eq("live").all()),
+            ))
+    live_view = view.index[view["source"] == "live"]
+    if len(live_view) and live_view[0] > view.index.min():
+        fig.add_shape(type="line", x0=live_view[0], x1=live_view[0], y0=0, y1=1, yref="paper",
+                      line=dict(color=MUTED, dash="dash", width=1))
+        fig.add_annotation(x=live_view[0], y=1, yref="paper", text="current model →",
+                           showarrow=False, xanchor="left", font=dict(color=MUTED))
     today_ts = pd.Timestamp(pred["data_date"])
     if today_ts >= view.index.min():
         fig.add_trace(go.Scatter(
@@ -379,13 +395,15 @@ if oos is not None:
         fig.add_hline(y=30, line_dash="dot", line_color=MUTED,
                       annotation_text="30% alert level", annotation_font_color=MUTED)
     fig.update_yaxes(title="Probability (%)", range=[0, ymax])
-    fig.update_layout(title="Walk-forward out-of-sample probabilities · gray bands = NBER recessions")
+    fig.update_layout(title="Out-of-sample probabilities (backtest, then current model) · gray bands = NBER recessions")
     st.plotly_chart(style_fig(fig, 420), use_container_width=True)
     st.caption(
-        "Every point is predicted by a model trained only on data available before "
-        "that fold, with first-release (vintage) inputs — this is what the model "
-        "would genuinely have said in real time. Fold 1 (pre-1984) shows raw, "
-        "uncalibrated output."
+        "Every point comes from a model that had not seen that date's outcome. Up to "
+        "the dashed divider: walk-forward backtest models trained only on earlier, "
+        "first-release (vintage) data. After it: the current production model, "
+        "recomputed with the latest data, so recent points can shift slightly when "
+        "data are revised. A step at the divider is the change of model, not a change "
+        "in the economy. Fold 1 (pre-1984) shows raw, uncalibrated output."
     )
 
 # ------------------------------------------------------- Section 6: backtest --

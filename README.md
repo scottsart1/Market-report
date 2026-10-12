@@ -80,6 +80,8 @@ src/recession/
     categories.py          0–100 category stress scores (diagnostic)
     predict.py             Production prediction + governance metadata
     history.py             SQLite prediction history
+    timeline.py            History-chart series: backtest up to the training
+                           cutoff, then the production model through today
     train.py               End-to-end training CLI, artifacts, model card
 models/trained/            production_bundle.joblib, backtest_results.json,
                            oos_predictions.parquet, model_card.md

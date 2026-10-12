@@ -184,9 +184,12 @@ footer{margin-top:52px;padding-top:16px;border-top:1px solid var(--grid);color:v
     <div class="sec-head">
       <div class="eyebrow">Section 5</div>
       <h2>Historical out-of-sample probability</h2>
-      <div class="sub">Every point comes from a model trained only on data available before that
-        fold, on first-release (vintage) inputs — what the model would genuinely have said in
-        real time. Gray bands are NBER recessions; pre-1984 output is raw and uncalibrated.</div>
+      <div class="sub">Every point comes from a model that had not seen that date's outcome. Up to
+        the dashed divider: walk-forward backtest models trained only on earlier, first-release
+        (vintage) data. After it: the current model behind the cards above, recomputed daily with
+        the latest data, so recent points can shift slightly when data are revised. A step at the
+        divider is the change of model, not a change in the economy. Gray bands are NBER
+        recessions; pre-1984 output is raw and uncalibrated.</div>
     </div>
     <div class="card">
       <div class="eyebrow" style="margin-bottom:6px">Time range</div>
@@ -446,6 +449,10 @@ tiles.innerHTML = H.map(h=>{
     const h=+b.dataset.h; if(active.has(h)&&active.size>1){active.delete(h);b.classList.remove('on');}
     else{active.add(h);b.classList.add('on');} draw();});
 
+  // backtest up to liveFrom, current production model from it onward
+  const liveFrom=hd.live_from? new Date(hd.live_from) : null;
+  const isLive=i=> liveFrom!==null && dates[i].getTime()>=liveFrom.getTime();
+
   // ---- time-range presets ----
   const lastD=dates[dates.length-1];
   const lastSpanEnd=hd.spans.length? new Date(hd.spans[hd.spans.length-1][1]) : null;
@@ -502,6 +509,12 @@ tiles.innerHTML = H.map(h=>{
       if(t>t0&&t<t1)ticks.push([t,String(yr)]);}}
     else if(spanDays>750){for(let yr=1965;yr<=2100;yr++){const t=new Date(yr+'-01-01').getTime();
       if(t>t0&&t<t1)ticks.push([t,String(yr)]);}}
+    else if(spanDays<=62){  // early in a quarter the range is only days long
+      const stepD=spanDays<=16?2:7;
+      const d=new Date(t0); d.setHours(0,0,0,0);
+      d.setDate(d.getDate()+(stepD===7?((8-d.getDay())%7||7):1));  // next Monday, or next day
+      for(;d.getTime()<t1;d.setDate(d.getDate()+stepD))
+        ticks.push([d.getTime(),MONTHS[d.getMonth()]+' '+d.getDate()]);}
     else{const step=spanDays>400?3:1;
       const d0=new Date(t0); d0.setDate(1);
       for(let d=new Date(d0);d.getTime()<t1;d.setMonth(d.getMonth()+step)){
@@ -511,11 +524,21 @@ tiles.innerHTML = H.map(h=>{
     if(ymax>=0.3){
       el('line',{x1:m.l,x2:W-m.r,y1:Y(0.3),y2:Y(0.3),stroke:'var(--muted)','stroke-dasharray':'3 4'},svg);
       el('text',{x:W-m.r-4,y:Y(0.3)-5,'text-anchor':'end'},svg).textContent='30% alert level';}
+    // model switch: divider, and no line bridging the two models
+    const showDiv=liveFrom!==null && liveFrom.getTime()>t0 && liveFrom.getTime()<=t1;
+    if(showDiv){
+      const xd=X(liveFrom.getTime());
+      el('line',{x1:xd,x2:xd,y1:m.t,y2:m.t+ih,stroke:'var(--muted)','stroke-dasharray':'4 4'},svg);
+      const nearEnd=xd>W-m.r-110;
+      el('text',{x:nearEnd?xd-6:xd+6,y:m.t+12,'text-anchor':nearEnd?'end':'start'},svg)
+        .textContent='current model →';}
     for(const h of order){
       if(!active.has(h))continue;
-      const pts=[]; for(const i of idx){const v=hd['p'+h][i];
-        if(v!=null)pts.push(`${X(dates[i].getTime()).toFixed(1)},${Y(v).toFixed(1)}`);}
-      el('polyline',{points:pts.join(' '),fill:'none',stroke:SLOT[h],'stroke-width':h==90?2:1.6},svg);}
+      for(const live of [false,true]){
+        const pts=[]; for(const i of idx){const v=hd['p'+h][i];
+          if(v!=null&&isLive(i)===live)pts.push(`${X(dates[i].getTime()).toFixed(1)},${Y(v).toFixed(1)}`);}
+        if(pts.length)
+          el('polyline',{points:pts.join(' '),fill:'none',stroke:SLOT[h],'stroke-width':h==90?2:1.6},svg);}}
     // today marker (production model)
     const tToday=new Date(P.data_date).getTime();
     if(tToday>=t0&&tToday<=t1)
@@ -532,9 +555,9 @@ tiles.innerHTML = H.map(h=>{
       for(const i of idx){const d=Math.abs(dates[i].getTime()-t); if(d<bd){bd=d;best=i;}}
       cross.setAttribute('x1',X(dates[best].getTime()));cross.setAttribute('x2',X(dates[best].getTime()));
       cross.setAttribute('visibility','visible');
-      let html=`<b>${hd.dates[best]}</b>`;
+      let html=`<b>${hd.dates[best]}</b> <span style="color:var(--muted)">${isLive(best)?'current model':'backtest'}</span>`;
       for(const h of order) if(active.has(h))
-        html+=`<br><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SLOT[h]};margin-right:6px"></span>${h==365?'1y':h+'d'}&nbsp; ${fmtP(hd['p'+h][best],1)}`;
+        html+=`<br><span class="sw" style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${SLOT[h]};margin-right:6px"></span>${h==365?'1y':h+'d'}&nbsp; ${fmtP(hd['p'+h][best],hd['p'+h][best]<0.01?2:1)}`;
       showTip(html,ev.clientX,ev.clientY);});
     overlay.addEventListener('mouseleave',()=>{cross.setAttribute('visibility','hidden');hideTip();});
     const leg=document.createElement('div');leg.className='legend';
@@ -542,6 +565,8 @@ tiles.innerHTML = H.map(h=>{
       `<span><span class="sw" style="background:${SLOT[h]}"></span>${h==365?'1-year':h+'-day'}</span>`).join('')+
       `<span><span class="sw" style="background:var(--shade);height:12px"></span>NBER recession</span>
        <span><span class="sw" style="background:var(--ink);width:8px;height:8px;border-radius:50%"></span>today (production model)</span>`
+      +(showDiv?`<span><span class="sw" style="width:0;height:12px;border-left:1.5px dashed var(--muted);border-radius:0"></span>backtest → current model (${hd.live_from})</span>`
+        :(liveFrom!==null&&liveFrom.getTime()<=t0?`<span style="color:var(--muted)">all points: current model</span>`:''))
       +(range!=='Full history'?`<span style="color:var(--muted)">y-axis fitted to range (max ${(ymax*100).toFixed(dec)}%)</span>`:'');
     holder.appendChild(svg); holder.appendChild(leg);
   }
