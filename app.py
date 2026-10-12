@@ -322,7 +322,7 @@ except Exception as exc:
 
 if oos is not None:
     avail_h = [h for h in (365, 90, 60, 45, 30, 15) if f"p{h}" in oos.columns]
-    fcol, hcol = st.columns([2, 3])
+    fcol, hcol, ycol = st.columns([2, 3, 1])
     with fcol:
         range_choice = st.selectbox(
             "Time range",
@@ -336,6 +336,8 @@ if oos is not None:
             default=[h for h in ("90D", "30D", "365D") if h in [f"{x}D" for x in avail_h]],
             key="hsel",
         )
+    with ycol:
+        yscale = st.radio("Y axis", ["Linear", "Log"], key="hyscale", horizontal=True)
 
     # backtest up to the training cutoff, then the production model through today
     tl = stitch_timeline(oos, curve, pred["train_end"], out.get("recession_calendar"))
@@ -385,16 +387,25 @@ if oos is not None:
             x=[today_ts], y=[probs[90] * 100], mode="markers",
             marker=dict(color=INK, size=9, symbol="diamond"), name="Today (production model)",
         ))
-    # full history keeps the 0-100% frame; zoomed views fit the data
-    if range_choice == "Full history":
-        ymax = 100.0
+    # the y-axis always fits the visible lines (and today's marker)
+    vals = view[shown_cols].to_numpy(dtype=float).ravel() * 100 if shown_cols and len(view) else np.array([])
+    vals = vals[np.isfinite(vals)]
+    if today_ts >= view.index.min() and "p90" in shown_cols:
+        vals = np.append(vals, probs[90] * 100)
+    peak = float(vals.max()) if len(vals) else 1.0
+    ladder = [0.05, 0.1, 0.2, 0.4, 1, 2, 4, 10, 20, 40, 60, 80, 100]
+    ymax = next((v for v in ladder if v >= peak * 1.12), 100.0)
+    if yscale == "Log":
+        floor = float(vals[vals > 0].min()) if (vals > 0).any() else 0.1
+        ymin = max(0.01, 10 ** (np.floor(np.log10(floor)) - 1))
+        fig.update_yaxes(title="Probability (%)", type="log",
+                         range=[np.log10(ymin), np.log10(ymax)])
     else:
-        peak = float(view[shown_cols].max().max() * 100) if shown_cols and len(view) else 3.0
-        ymax = min(100.0, max(3.0, peak * 1.3))
-    if ymax >= 30:
+        ymin = 0.0
+        fig.update_yaxes(title="Probability (%)", range=[0, ymax])
+    if ymax >= 30 >= ymin:
         fig.add_hline(y=30, line_dash="dot", line_color=MUTED,
                       annotation_text="30% alert level", annotation_font_color=MUTED)
-    fig.update_yaxes(title="Probability (%)", range=[0, ymax])
     fig.update_layout(title="Out-of-sample probabilities (backtest, then current model) · gray bands = NBER recessions")
     st.plotly_chart(style_fig(fig, 420), use_container_width=True)
     st.caption(
