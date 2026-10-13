@@ -41,7 +41,8 @@ class FeatureSubset(BaseEstimator, TransformerMixin):
 
 class ProbitModel(BaseEstimator, ClassifierMixin):
     """Statsmodels probit with median imputation and scaling — the classic
-    econometric yield-curve recession model."""
+    econometric yield-curve recession model. Fitted as a binomial GLM so it
+    honours the same event weights as the other members."""
 
     def __init__(self, columns: list[str]):
         self.columns = columns
@@ -54,11 +55,13 @@ class ProbitModel(BaseEstimator, ClassifierMixin):
         self.scaler_ = StandardScaler().fit(Z)
         Z = self.scaler_.transform(Z)
         Z = sm.add_constant(Z, has_constant="add")
-        model = sm.Probit(np.asarray(y, dtype=float), Z)
+        yy = np.asarray(y, dtype=float)
+        w = None if sample_weight is None else np.asarray(sample_weight, dtype=float)
+        glm = sm.GLM(yy, Z, family=sm.families.Binomial(link=sm.families.links.Probit()), freq_weights=w)
         try:
-            self.res_ = model.fit(disp=0, maxiter=200)
+            self.res_ = glm.fit(maxiter=200)
         except Exception:
-            self.res_ = model.fit(method="bfgs", disp=0, maxiter=500)
+            self.res_ = sm.Probit(yy, Z).fit(method="bfgs", disp=0, maxiter=500)
         self.classes_ = np.array([0, 1])
         return self
 
@@ -202,21 +205,29 @@ class EnsembleModel(BaseEstimator, ClassifierMixin):
 
 # ------------------------------------------------------------------ weights
 
-def training_weights(y: np.ndarray, next_onset: pd.Series) -> np.ndarray:
-    """Class-balanced weights with event-aware normalization: every recession
-    event contributes the same total positive weight, so no single episode
-    (e.g. the long 2008 run-up) dominates, and positives as a class carry the
-    same total weight as negatives."""
+def training_weights(y: np.ndarray, next_onset: pd.Series, class_balance: bool | None = None) -> np.ndarray:
+    """Event-aware weights: every recession event contributes the same total
+    positive weight, so no single episode (e.g. the long 2008 run-up)
+    dominates.
+
+    With class_balance (the v1 behaviour, experiment switch `class_balance`)
+    positives as a class are also scaled up to match the negatives' total
+    weight. That fits every member at a 50% prior instead of the ~4% base
+    rate and leaves the calibrator, fitted on one or two onsets, to undo a
+    +3 nat shift; without it the positives keep their natural share."""
     y = np.asarray(y, dtype=int)
     w = np.ones(len(y), dtype=float)
     pos = y == 1
     if pos.sum() == 0:
         return w
+    if class_balance is None:
+        class_balance = variant("class_balance", True)
     onset_ids = pd.Series(next_onset).astype("datetime64[ns]")
     counts = onset_ids[pos].groupby(onset_ids[pos]).transform("count")
     n_events = onset_ids[pos].nunique()
-    # each event's rows sum to 1, then scale positives to match negatives
-    w[pos] = (1.0 / counts.to_numpy()) * ((~pos).sum() / max(n_events, 1))
+    total_pos = (~pos).sum() if class_balance else pos.sum()
+    # each event's rows sum to total_pos / n_events
+    w[pos] = (1.0 / counts.to_numpy()) * (total_pos / max(n_events, 1))
     # normalize to mean 1 for stable regularization strength
     return w * len(w) / w.sum()
 

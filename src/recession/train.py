@@ -14,14 +14,17 @@ import numpy as np
 import pandas as pd
 
 from . import MODEL_VERSION
+from sklearn.base import clone
+
 from .backtest import (
-    LONG_H, TRAIN_START, fit_fold_calibrators, inner_split, run_backtest,
-    run_long_backtest,
+    LONG_H, TRAIN_START, ensemble_members, fit_fold_calibrators, inner_split,
+    prior_oos_calibrator, run_backtest, run_long_backtest,
 )
 from .config import load_config
 from .horizon import HazardTermStructure
 from .labels import HORIZONS, build_recession_calendar, make_labels
-from .models import build_models
+from .models import build_models, training_weights
+from .variants import active_variants, variant
 from .paths import MODELS_DIR, get_logger
 from .pipeline import build_panel, dataset_version, fetch_all, weekly_grid
 from .uncertainty import fit_bootstrap_models
@@ -92,44 +95,72 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
     train_idx = Xw.index[tr]
     fit_idx, cal_idx = inner_split(train_idx)
     y90_ser = labels["y90"]
+    calib_mode = str(variant("calibration", "inner"))
+    members = ensemble_members()
 
     models = build_models(feature_cols)
     fitted, calibrators = {}, {}
     for name in ("A_yield_curve", "B_elastic_net", "C_grad_boost", "bl_sahm", "bl_nfci", "bl_constant"):
-        inner, cals = fit_fold_calibrators(models[name], Xw, y90_ser, labels, fit_idx, cal_idx)
-        fitted[name] = inner
-        method = bt.calibrator_choice.get(name, "none")
-        calibrators[name] = cals.get(method, cals["none"])
+        if calib_mode == "prior_oos":
+            # served path validated by the walk-forward under the same switch:
+            # member fitted on every eligible row, calibrated on the pooled
+            # raw out-of-sample scores of all folds (every recession, each
+            # scored by a model that had not seen it)
+            w_full = training_weights(y90_ser.loc[train_idx].to_numpy(), labels.loc[train_idx, "next_onset"])
+            fitted[name] = clone(models[name]).fit(X_tr, y90_ser.loc[train_idx].to_numpy(), sample_weight=w_full)
+            el_oos = bt.oos["eligible"].astype(bool) & bt.oos[f"p_raw_{name}"].notna()
+            calibrators[name] = prior_oos_calibrator(
+                bt.oos.loc[el_oos, f"p_raw_{name}"].to_numpy(), bt.oos.loc[el_oos, "y90"].to_numpy(),
+                bt.oos.loc[el_oos, "next_onset"],
+            )
+        else:
+            inner, cals = fit_fold_calibrators(models[name], Xw, y90_ser, labels, fit_idx, cal_idx)
+            fitted[name] = inner
+            method = bt.calibrator_choice.get(name, "none")
+            calibrators[name] = cals.get(method, cals["none"])
 
     theta = HazardTermStructure()
     theta.theta_ = dict(bt.theta)
 
-    # production 1-year models: identical fold-8 construction on the
-    # long-eligible rows (which end a year before the labeled edge)
+    # production 1-year models: identical construction on the long-eligible
+    # rows (which end a year before the labeled edge)
     tr_long = (Xw.index >= TRAIN_START) & labels["eligible_long"].to_numpy()
     long_idx = Xw.index[tr_long]
     fit_idx_l, cal_idx_l = inner_split(long_idx, LONG_H)
     y365_ser = labels[f"y{LONG_H}"]
     models_long, calibrators_long = {}, {}
     for name in ("B_elastic_net", "C_grad_boost"):
-        inner, cals = fit_fold_calibrators(
-            build_models(feature_cols)[name], Xw, y365_ser, labels, fit_idx_l, cal_idx_l
-        )
-        models_long[name] = inner
-        method = long_bt["calibrator_choice"].get(name, "none")
-        calibrators_long[name] = cals.get(method, cals["none"])
+        proto = build_models(feature_cols)[name]
+        if calib_mode == "prior_oos":
+            w_full = training_weights(y365_ser.loc[long_idx].to_numpy(), labels.loc[long_idx, "next_onset"])
+            models_long[name] = clone(proto).fit(Xw.loc[long_idx], y365_ser.loc[long_idx].to_numpy(), sample_weight=w_full)
+            lo = long_bt["oos"]
+            el_oos = lo["eligible_long"].astype(bool) & lo[f"p_raw_{name}"].notna()
+            calibrators_long[name] = prior_oos_calibrator(
+                lo.loc[el_oos, f"p_raw_{name}"].to_numpy(), lo.loc[el_oos, f"y{LONG_H}"].to_numpy(),
+                lo.loc[el_oos, "next_onset"],
+            )
+        else:
+            inner, cals = fit_fold_calibrators(proto, Xw, y365_ser, labels, fit_idx_l, cal_idx_l)
+            models_long[name] = inner
+            method = long_bt["calibrator_choice"].get(name, "none")
+            calibrators_long[name] = cals.get(method, cals["none"])
+
+    # rows the served members were fitted on (for the bootstrap bands)
+    rows90 = train_idx if calib_mode == "prior_oos" else fit_idx
+    rows365 = long_idx if calib_mode == "prior_oos" else fit_idx_l
 
     # ------------------------------------------------ bootstrap uncertainty
     boot_models, boot_models_long = [], []
     if not fast:
         boot_models = fit_bootstrap_models(
-            Xw.loc[fit_idx], y90_ser.loc[fit_idx].to_numpy(),
-            labels.loc[fit_idx, "next_onset"], feature_cols,
+            Xw.loc[rows90], y90_ser.loc[rows90].to_numpy(),
+            labels.loc[rows90, "next_onset"], feature_cols,
             fixed_C=fitted["B_elastic_net"].C_,
         )
         boot_models_long = fit_bootstrap_models(
-            Xw.loc[fit_idx_l], y365_ser.loc[fit_idx_l].to_numpy(),
-            labels.loc[fit_idx_l, "next_onset"], feature_cols,
+            Xw.loc[rows365], y365_ser.loc[rows365].to_numpy(),
+            labels.loc[rows365, "next_onset"], feature_cols,
             fixed_C=models_long["B_elastic_net"].C_,
         )
 
@@ -139,7 +170,9 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         "model_version": MODEL_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "production_model": production,
-        "ensemble_members": ["B_elastic_net", "C_grad_boost"],
+        "ensemble_members": members,
+        "calibration_mode": calib_mode,
+        "variants": active_variants(),
         "models": fitted,
         "calibrators": calibrators,
         "calibrator_choice": bt.calibrator_choice,
@@ -154,12 +187,17 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         "train_medians": train_medians,
         "train_start": str(TRAIN_START.date()),
         "train_end": str(train_end.date()),
-        "fit_end": str(fit_idx.max().date()),
-        "cal_start": str(cal_idx.min().date()) if len(cal_idx) else None,
+        "fit_end": str(rows90.max().date()),
+        "cal_start": ("pooled walk-forward OOS" if calib_mode == "prior_oos"
+                      else (str(cal_idx.min().date()) if len(cal_idx) else None)),
         "n_train_rows": int(tr.sum()),
-        "n_fit_rows": int(len(fit_idx)),
-        "n_cal_rows": int(len(cal_idx)),
-        "n_cal_events": int(labels.loc[cal_idx, "next_onset"][labels.loc[cal_idx, "y90"] == 1].nunique()) if len(cal_idx) else 0,
+        "n_fit_rows": int(len(rows90)),
+        "n_cal_rows": int(bt.oos["eligible"].astype(bool).sum()) if calib_mode == "prior_oos" else int(len(cal_idx)),
+        "n_cal_events": (
+            int(bt.oos.loc[bt.oos["eligible"].astype(bool) & (bt.oos["y90"] == 1), "next_onset"].nunique())
+            if calib_mode == "prior_oos"
+            else (int(labels.loc[cal_idx, "next_onset"][labels.loc[cal_idx, "y90"] == 1].nunique()) if len(cal_idx) else 0)
+        ),
         "n_train_events": int(labels.loc[tr, "next_onset"][labels.loc[tr, "y90"] == 1].nunique()),
         "dataset_version": dataset_version(fetched),
         "boot_models": boot_models,

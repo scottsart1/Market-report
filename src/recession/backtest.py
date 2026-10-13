@@ -32,10 +32,13 @@ import pandas as pd
 from sklearn.base import clone
 from sklearn.metrics import average_precision_score, brier_score_loss, roc_auc_score
 
-from .horizon import CALIBRATORS, HazardTermStructure, IdentityCalibrator, log_loss_w
+from .horizon import (
+    CALIBRATORS, HazardTermStructure, IdentityCalibrator, PlattCalibrator, log_loss_w,
+)
 from .labels import HORIZONS
 from .models import build_models, training_weights
 from .paths import get_logger
+from .variants import variant
 
 log = get_logger(__name__)
 
@@ -46,12 +49,26 @@ INNER_CAL_FRAC = 0.25      # tail share of each training window used to calibrat
 MIN_CAL_POS = 5            # positive rows required to fit a calibrator
 MIN_CAL_EVENTS = 2         # distinct onsets required to fit any calibrator
 MIN_ISO_EVENTS = 3         # distinct onsets required for the isotonic one
-DETECT_THRESHOLD = 0.20    # "the model warned" level for event detection
+# Event metrics use base-rate-relative thresholds: a well-scaled 90-day
+# probability rarely reaches 0.20 when the base rate is ~3.5%, and absolute
+# thresholds rewarded members whose scale was inflated. The absolute levels
+# are kept for the dashboard bands and reported alongside.
+DETECT_MULT = 3.0          # "the model warned": p >= 3x the OOS base rate
+ALARM_MULT = 6.0           # sustained p >= 6x the base rate counts as an alarm
+DETECT_THRESHOLD = 0.20    # absolute level, reported for comparison
 ALARM_THRESHOLD = 0.30
 ALARM_MIN_DAYS = 28
-ALARM_LOOKAHEAD_DAYS = 270
+ALARM_LOOKAHEAD_DAYS = 365      # an alarm followed by an onset within a year is not false
+EARLY_WARNING_DAYS = 270        # ...but 270-365 days ahead is reported as an early warning
 
 CONTENDERS = ("A_yield_curve", "B_elastic_net", "C_grad_boost", "D_ensemble")
+MEMBER_CODES = {"A": "A_yield_curve", "B": "B_elastic_net", "C": "C_grad_boost"}
+
+
+def ensemble_members() -> list[str]:
+    """Members of the ensemble D: experiment switch `ensemble`, e.g. "A,B,C"."""
+    codes = [c.strip().upper() for c in str(variant("ensemble", "B,C")).split(",") if c.strip()]
+    return [MEMBER_CODES[c] for c in codes]
 
 FOLDS = [
     ("F1 1978-83 (1980, 1981-82 recessions)", "1978-01-01", "1983-12-31"),
@@ -155,6 +172,20 @@ def n_events(y: np.ndarray, next_onset: pd.Series) -> int:
     return int(pd.Series(next_onset).astype("datetime64[ns]")[pos].nunique())
 
 
+def prior_oos_calibrator(p_prior: np.ndarray, y_prior: np.ndarray, onsets_prior: pd.Series):
+    """Platt calibrator fitted on the pooled raw out-of-sample scores of the
+    folds before the current one (switch `calibration=prior_oos`). Scores
+    from earlier folds are genuinely out of sample for their own models, so
+    this uses several recessions instead of one purged tail. Identity when
+    too few onsets are available or the fit carries no ranking information."""
+    y_prior = np.asarray(y_prior, dtype=int)
+    if len(y_prior) >= 30 and y_prior.sum() >= MIN_CAL_POS and n_events(y_prior, onsets_prior) >= MIN_CAL_EVENTS:
+        cal = PlattCalibrator().fit(np.asarray(p_prior, dtype=float), y_prior)
+        if cal.is_informative():
+            return cal
+    return IdentityCalibrator()
+
+
 def fit_fold_calibrators(
     proto, X, y90, labels, fit_idx, cal_idx
 ) -> tuple[object, dict[str, object]]:
@@ -246,27 +277,46 @@ def run_backtest(
     oos = oos.dropna(subset=["fold"])
     el = oos["eligible"].astype(bool)
 
-    # ---- choose the calibration method per model (pooled OOS Brier+logloss) --
     calibrator_choice: dict[str, str] = {}
-    for mname in base_names:
-        scores = {}
-        for cname in CALIBRATORS:
-            col = f"p_{cname}_{mname}"
-            if col not in oos.columns:
-                continue
-            p = oos.loc[el, col].astype(float)
-            filled = p.fillna(oos.loc[el, f"p_none_{mname}"].astype(float))
-            y = oos.loc[el, "y90"].astype(int)
-            scores[cname] = brier_score_loss(y, filled) + 0.25 * log_loss_w(y, filled)
-        best = min(scores, key=scores.get)
-        calibrator_choice[mname] = best
-        pc = oos[f"p_{best}_{mname}"].astype(float)
-        oos[f"p_cal_{mname}"] = pc.fillna(oos[f"p_none_{mname}"].astype(float))
+    calib_mode = str(variant("calibration", "inner"))
+    if calib_mode == "prior_oos":
+        # ---- served path: full-train model, calibrated on the raw OOS scores
+        # of the folds before it (walk-forward: fold k never sees fold k) ----
+        for mname in base_names:
+            raw = f"p_raw_{mname}"
+            oos[f"p_cal_{mname}"] = np.nan
+            for f in folds:
+                k = f["k"]
+                rows = oos["fold"] == k
+                prior = el & (oos["fold"] < k) & oos[raw].notna()
+                cal = prior_oos_calibrator(
+                    oos.loc[prior, raw].to_numpy(), oos.loc[prior, "y90"].to_numpy(),
+                    oos.loc[prior, "next_onset"],
+                )
+                oos.loc[rows, f"p_cal_{mname}"] = cal.transform(oos.loc[rows, raw].to_numpy(dtype=float))
+            calibrator_choice[mname] = "prior_oos"
+    else:
+        # ---- choose the calibration method per model (pooled OOS Brier+logloss) --
+        for mname in base_names:
+            scores = {}
+            for cname in CALIBRATORS:
+                col = f"p_{cname}_{mname}"
+                if col not in oos.columns:
+                    continue
+                p = oos.loc[el, col].astype(float)
+                filled = p.fillna(oos.loc[el, f"p_none_{mname}"].astype(float))
+                y = oos.loc[el, "y90"].astype(int)
+                scores[cname] = brier_score_loss(y, filled) + 0.25 * log_loss_w(y, filled)
+            best = min(scores, key=scores.get)
+            calibrator_choice[mname] = best
+            pc = oos[f"p_{best}_{mname}"].astype(float)
+            oos[f"p_cal_{mname}"] = pc.fillna(oos[f"p_none_{mname}"].astype(float))
 
-    # ---- ensemble D: mean of calibrated B and C ----
-    if "p_cal_B_elastic_net" in oos.columns and "p_cal_C_grad_boost" in oos.columns:
-        oos["p_raw_D_ensemble"] = oos[["p_raw_B_elastic_net", "p_raw_C_grad_boost"]].mean(axis=1)
-        oos["p_cal_D_ensemble"] = oos[["p_cal_B_elastic_net", "p_cal_C_grad_boost"]].mean(axis=1)
+    # ---- ensemble D: plain mean of calibrated members (switch `ensemble`) ----
+    members = ensemble_members()
+    if all(f"p_cal_{m}" in oos.columns for m in members):
+        oos["p_raw_D_ensemble"] = oos[[f"p_raw_{m}" for m in members]].mean(axis=1)
+        oos["p_cal_D_ensemble"] = oos[[f"p_cal_{m}" for m in members]].mean(axis=1)
         calibrator_choice["D_ensemble"] = "members"
 
     # ---- metrics ----
@@ -398,7 +448,7 @@ def run_backtest(
         reliability[m] = rows
 
     # keep the persisted frame tidy: drop per-method intermediate columns
-    method_prefixes = tuple(f"p_{m}_" for m in CALIBRATORS)
+    method_prefixes = tuple(f"p_{m}_" for m in CALIBRATORS) + ("p_prior_",)
     drop = [c for c in oos.columns if c.startswith(method_prefixes)]
     oos = oos.drop(columns=drop)
 
@@ -437,6 +487,7 @@ def run_long_backtest(
 
     oos = labels[[f"y{LONG_H}", "eligible_long", "next_onset"]].copy()
     oos["fold"] = np.nan
+    calib_mode = str(variant("calibration", "inner"))
     for f in folds:
         train_end = f["test_start"] - pd.Timedelta(days=EMBARGO_DAYS + LONG_H)
         tr = (X.index >= TRAIN_START) & (X.index <= train_end) & el.to_numpy()
@@ -446,29 +497,49 @@ def run_long_backtest(
             continue
         oos.loc[te, "fold"] = f["k"]
         fit_idx, cal_idx = inner_split(train_idx, LONG_H)
+        w_full = training_weights(y.loc[train_idx].to_numpy(), labels.loc[train_idx, "next_onset"])
         for mname, proto in protos.items():
+            full_model = clone(proto).fit(X.loc[train_idx], y.loc[train_idx].to_numpy(), sample_weight=w_full)
+            oos.loc[te, f"p_raw_{mname}"] = full_model.predict_proba(X[te])[:, 1]
             inner, cals = fit_fold_calibrators(proto, X, y, labels, fit_idx, cal_idx)
             p_inner = inner.predict_proba(X[te])[:, 1]
             for cname, cal in cals.items():
+                if not cal.covers(p_inner):
+                    continue
                 oos.loc[te, f"p_{cname}_{mname}"] = cal.transform(p_inner)
     oos = oos.dropna(subset=["fold"])
     elo = oos["eligible_long"].astype(bool)
 
     calibrator_choice: dict[str, str] = {}
-    for mname in protos:
-        scores = {}
-        for cname in CALIBRATORS:
-            col = f"p_{cname}_{mname}"
-            if col not in oos.columns:
-                continue
-            p = oos.loc[elo, col].astype(float).fillna(oos.loc[elo, f"p_none_{mname}"].astype(float))
-            yy = oos.loc[elo, f"y{LONG_H}"].astype(int)
-            scores[cname] = brier_score_loss(yy, p) + 0.25 * log_loss_w(yy, p)
-        best = min(scores, key=scores.get)
-        calibrator_choice[mname] = best
-        oos[f"p_cal_{mname}"] = (
-            oos[f"p_{best}_{mname}"].astype(float).fillna(oos[f"p_none_{mname}"].astype(float))
-        )
+    if calib_mode == "prior_oos":
+        for mname in protos:
+            raw = f"p_raw_{mname}"
+            oos[f"p_cal_{mname}"] = np.nan
+            for f in folds:
+                k = f["k"]
+                rows = oos["fold"] == k
+                prior = elo & (oos["fold"] < k) & oos[raw].notna()
+                cal = prior_oos_calibrator(
+                    oos.loc[prior, raw].to_numpy(), oos.loc[prior, f"y{LONG_H}"].to_numpy(),
+                    oos.loc[prior, "next_onset"],
+                )
+                oos.loc[rows, f"p_cal_{mname}"] = cal.transform(oos.loc[rows, raw].to_numpy(dtype=float))
+            calibrator_choice[mname] = "prior_oos"
+    else:
+        for mname in protos:
+            scores = {}
+            for cname in CALIBRATORS:
+                col = f"p_{cname}_{mname}"
+                if col not in oos.columns:
+                    continue
+                p = oos.loc[elo, col].astype(float).fillna(oos.loc[elo, f"p_none_{mname}"].astype(float))
+                yy = oos.loc[elo, f"y{LONG_H}"].astype(int)
+                scores[cname] = brier_score_loss(yy, p) + 0.25 * log_loss_w(yy, p)
+            best = min(scores, key=scores.get)
+            calibrator_choice[mname] = best
+            oos[f"p_cal_{mname}"] = (
+                oos[f"p_{best}_{mname}"].astype(float).fillna(oos[f"p_none_{mname}"].astype(float))
+            )
     oos["p_cal_long"] = oos[[f"p_cal_{m}" for m in protos]].mean(axis=1)
 
     metrics = {
@@ -491,8 +562,10 @@ def run_long_backtest(
             "detected": bool(p_pre.max() >= LONG_DETECT),
         })
 
+    keep = ["fold", "eligible_long", f"y{LONG_H}", "next_onset", "p_cal_long"]
+    keep += [c for c in oos.columns if c.startswith(("p_raw_", "p_cal_")) and c not in keep]
     return {
-        "oos": oos[["fold", "eligible_long", f"y{LONG_H}", "p_cal_long"]],
+        "oos": oos[keep],
         "metrics": metrics,
         "calibrator_choice": calibrator_choice,
         "events": events,
@@ -500,9 +573,20 @@ def run_long_backtest(
     }
 
 
+def event_thresholds(base_rate: float) -> tuple[float, float]:
+    """(detection, alarm) thresholds relative to a base rate."""
+    return DETECT_MULT * base_rate, ALARM_MULT * base_rate
+
+
 def event_analysis(oos: pd.DataFrame, pcol: str) -> tuple[list, list]:
-    """Per-recession detection stats + false-alarm episodes, on OOS rows."""
+    """Per-recession detection stats + false-alarm episodes, on OOS rows.
+
+    Thresholds are relative to the out-of-sample base rate of the target
+    (see DETECT_MULT / ALARM_MULT); the absolute 0.20 level is reported too.
+    """
     el = oos["eligible"].astype(bool)
+    base = float(oos.loc[el, "y90"].astype(float).mean())
+    det_thr, alarm_thr = event_thresholds(base)
     onsets = sorted(pd.DatetimeIndex(oos.loc[oos["y90"] == 1, "next_onset"].dropna().unique()))
     events = []
     for o in onsets:
@@ -511,21 +595,23 @@ def event_analysis(oos: pd.DataFrame, pcol: str) -> tuple[list, list]:
             continue
         p_pre = oos.loc[pre, pcol].astype(float)
         win90 = p_pre[p_pre.index >= o - pd.Timedelta(days=90)]
-        crossings = p_pre[p_pre >= DETECT_THRESHOLD]
+        crossings = p_pre[p_pre >= det_thr]
         events.append({
             "onset": str(pd.Timestamp(o).date()),
             "max_p_90d_before": float(win90.max()) if len(win90) else np.nan,
             "max_p_365d_before": float(p_pre.max()),
             "first_cross": str(crossings.index.min().date()) if len(crossings) else None,
             "lead_days": int((o - crossings.index.min()).days) if len(crossings) else None,
-            "detected": bool(p_pre.max() >= DETECT_THRESHOLD),
+            "detected": bool(p_pre.max() >= det_thr),
+            "detected_abs": bool(p_pre.max() >= DETECT_THRESHOLD),
+            "detect_threshold": round(det_thr, 4),
         })
 
-    # false alarms: sustained high probability with no onset following
+    # alarms: sustained high probability; false unless an onset follows
     onset_arr = pd.DatetimeIndex(onsets)
     sub = oos[el].sort_index()
-    hot = sub[pcol].astype(float) >= ALARM_THRESHOLD
-    false_alarms: list[dict] = []
+    hot = sub[pcol].astype(float) >= alarm_thr
+    alarms: list[dict] = []
     run_start = None
     prev_t = None
     for t, is_hot in hot.items():
@@ -533,24 +619,30 @@ def event_analysis(oos: pd.DataFrame, pcol: str) -> tuple[list, list]:
             run_start = t
         broken = (not is_hot) or (prev_t is not None and (t - prev_t).days > 21)
         if run_start is not None and broken:
-            _record_alarm(false_alarms, sub, pcol, run_start, prev_t, onset_arr)
+            _record_alarm(alarms, sub, pcol, run_start, prev_t, onset_arr, alarm_thr)
             run_start = t if is_hot else None
         prev_t = t
     if run_start is not None:
-        _record_alarm(false_alarms, sub, pcol, run_start, prev_t, onset_arr)
+        _record_alarm(alarms, sub, pcol, run_start, prev_t, onset_arr, alarm_thr)
+    false_alarms = [a for a in alarms if a["kind"] == "false"]
     return events, false_alarms
 
 
-def _record_alarm(acc: list, sub: pd.DataFrame, pcol: str, start, end, onsets) -> None:
+def _record_alarm(acc: list, sub: pd.DataFrame, pcol: str, start, end, onsets, thr) -> None:
     if start is None or end is None or (end - start).days < ALARM_MIN_DAYS:
         return
-    horizon_end = end + pd.Timedelta(days=ALARM_LOOKAHEAD_DAYS)
-    followed = any((o > start) and (o <= horizon_end) for o in onsets)
-    if not followed:
-        seg = sub.loc[start:end, pcol].astype(float)
-        acc.append({
-            "start": str(pd.Timestamp(start).date()),
-            "end": str(pd.Timestamp(end).date()),
-            "days": int((end - start).days),
-            "max_p": float(seg.max()),
-        })
+    nxt = [o for o in onsets if o > start]
+    days_to_onset = int((nxt[0] - end).days) if nxt else None
+    if days_to_onset is not None and days_to_onset <= EARLY_WARNING_DAYS:
+        return  # a warning that an onset followed within the look-ahead
+    kind = "early_warning" if (days_to_onset is not None and days_to_onset <= ALARM_LOOKAHEAD_DAYS) else "false"
+    seg = sub.loc[start:end, pcol].astype(float)
+    acc.append({
+        "start": str(pd.Timestamp(start).date()),
+        "end": str(pd.Timestamp(end).date()),
+        "days": int((end - start).days),
+        "max_p": float(seg.max()),
+        "threshold": round(float(thr), 4),
+        "days_to_next_onset": days_to_onset,
+        "kind": kind,
+    })
