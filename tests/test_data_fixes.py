@@ -81,3 +81,15 @@ def test_label_maturity_excludes_the_unconfirmed_tail(synthetic_usrec):
     assert (cal.last_label_date - last_eligible).days < 90 + LABEL_MATURITY_DAYS + 14
     lab0 = make_labels(grid, cal, maturity_days=0)
     assert lab0["eligible"].sum() > lab["eligible"].sum()
+
+
+def test_discontinued_series_reports_archived_not_stale():
+    import pandas as pd
+    from recession.config import load_config
+    from recession.pipeline import data_health
+    cfg = load_config()
+    now = pd.Timestamp("2026-10-13")
+    h = data_health(cfg, {}, now)  # nothing fetched: every row errors, but the flag is wired
+    assert "status" in h.columns
+    old = [i.id for i in cfg.indicators if i.discontinued]
+    assert set(old) == {"CP3M", "SUBLPDCLIWXWFRNQ", "TWEXBMTH", "VXOCLS"}

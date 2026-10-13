@@ -93,7 +93,8 @@ def test_stale_data_flagged():
     h = data_health(cfg, fetched, now)
     assert h.loc[h["id"] == "ICSA", "status"].iloc[0] == "stale"
     assert h.loc[h["id"] == "NFCI", "status"].iloc[0] == "cache_fallback"
-    assert (h.loc[~h["id"].isin(["ICSA", "NFCI"]), "status"] == "fresh").all()
+    assert h.loc[~h["id"].isin(["ICSA", "NFCI"]), "status"].isin(["fresh", "archived"]).all()
+    assert (h.loc[h["id"] == "CP3M", "status"] == "archived").all()  # discontinued splice leg
 
 
 def test_risk_bands_cover_unit_interval():

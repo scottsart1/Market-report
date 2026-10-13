@@ -603,9 +603,10 @@ with st.expander("Read the full methodology", expanded=False):
   who knows current revisions.
 - **The NBER label itself lags**: recent months can be re-labeled after the fact,
   so the most recent ~2 quarters of "no recession" ground truth are provisional.
-- **Uncertainty.** The band is a block-bootstrap 10–90% range on the interpretable
-  model, centered on the production probability — a lower bound on true
-  uncertainty. With ~8 recessions of usable history, differences like 17.4% vs
+- **Uncertainty.** The band is a 3-year block-bootstrap 10–90% range: every
+  served ensemble member is refitted on each resample and scored through the
+  production calibrators, centered on the production probability — a lower
+  bound on true uncertainty (it does not price architecture choice). With ~8 recessions of usable history, differences like 17.4% vs
   15–22% are not statistically meaningful; read ranges, not decimals.
 """)
 

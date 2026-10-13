@@ -220,9 +220,9 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
     health = data_health(cfg, fetched, now)
     snapshot = indicator_snapshot(cfg, frames_now, Xw.reindex(columns=feature_cols), now)
 
-    n_ok = int((health["status"] == "fresh").sum())
+    n_ok = int(health["status"].isin(["fresh", "archived"]).sum())
     n_bad = int(len(health) - n_ok)
-    tier1 = health[health["tier"] == 1]
+    tier1 = health[(health["tier"] == 1) & (health["status"] != "archived")]
     tier1_fresh = float((tier1["status"] == "fresh").mean()) if len(tier1) else 0.0
     band_width = (band[90][1] - band[90][0]) if 90 in band else np.nan
     confidence = (

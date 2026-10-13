@@ -382,6 +382,7 @@ def data_health(
                 "days_stale": days_stale,
                 "status": (
                     "cache_fallback" if latest.fetch_error else
+                    "archived" if ind.discontinued else
                     "stale" if days_stale > 2 * expected_gap + 7 else "fresh"
                 ),
                 "error": latest.fetch_error,

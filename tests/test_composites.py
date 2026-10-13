@@ -104,3 +104,12 @@ def test_config_parses_composites(tmp_path):
     assert br.source == "composite" and br.composite_kind == "breadth_pctile" and br.frequency == "d"
     assert "BR__level" in cfg.feature_specs() and cfg.features_for(365) == ["DGS10__level"]
     assert isinstance(cfg, IndicatorConfig)
+
+
+def test_invshare_transform_and_archived_health():
+    v = pd.Series(np.r_[np.full(12, 1.0), np.full(12, -1.0)], dtype=float)
+    s = transform_values(v, "invshare1y", "m")
+    assert s.iloc[11] == 0.0 and s.iloc[-1] == 1.0 and s.iloc[17] == pytest.approx(0.5)
+    ind = Indicator(id="OLD", name="o", category="rates", source="fred", frequency="m",
+                    publication_lag_days=1, vintage=False, tier=1, license="public", discontinued=True)
+    assert ind.discontinued

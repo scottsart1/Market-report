@@ -109,7 +109,7 @@ indicators:
       - {t: lag12m,     risk: -1, desc: "10Y-3M spread a year ago"}
       - {t: min1y,      risk: -1, desc: "10Y-3M spread, 1-year low"}
       - {t: invdepth1y, risk: +1, desc: "Average depth of 10Y-3M inversion over the past year"}
-      - {t: inv_share2y, risk: +1, desc: "Share of past two years with inverted 10Y-3M curve"}
+      - {t: invshare2y, risk: +1, desc: "Share of past two years with inverted 10Y-3M curve"}
 
   - id: SPREAD_10Y2Y
     name: 10Y-2Y Treasury Spread
@@ -1400,6 +1400,7 @@ indicators:
     name: 3-Month Commercial Paper Rate (to 1997)
     category: credit
     source: fred
+    discontinued: true
     frequency: m
     publication_lag_days: 1
     vintage: false
@@ -1477,6 +1478,7 @@ indicators:
     name: "SLOOS: Willingness to Make Consumer Loans (1966-2017)"
     category: credit
     source: fred
+    discontinued: true
     frequency: q
     publication_lag_days: -55
     vintage: false
@@ -1576,6 +1578,7 @@ indicators:
     name: Excess Bond Premium (Gilchrist-Zakrajsek)
     category: credit
     source: url
+    core: false
     url: "https://www.federalreserve.gov/econres/notes/feds-notes/ebp_csv.csv"
     url_date_col: date
     url_value_col: ebp
@@ -1595,6 +1598,7 @@ indicators:
     name: Gilchrist-Zakrajsek Credit Spread
     category: credit
     source: url
+    core: false
     url: "https://www.federalreserve.gov/econres/notes/feds-notes/ebp_csv.csv"
     url_date_col: date
     url_value_col: gz_spread
@@ -1860,6 +1864,7 @@ indicators:
     name: Trade-Weighted Dollar, Broad (1973-2019)
     category: trade
     source: fred
+    discontinued: true
     frequency: m
     publication_lag_days: 7
     vintage: false
@@ -1899,6 +1904,7 @@ indicators:
     name: CBOE S&P 100 Volatility (VXO, 1986-2021)
     category: markets
     source: fred
+    discontinued: true
     frequency: d
     publication_lag_days: 1
     vintage: false

@@ -112,6 +112,10 @@ def transform_values(v: pd.Series, code: str, frequency: str) -> pd.Series:
     if m:  # average inversion depth over N years: mean of max(-v, 0)
         return _rolling(np.maximum(-v, 0.0), periods_for_months(f, 12 * int(m.group(1))), "mean")
 
+    m = re.fullmatch(r"invshare(\d+)y", code)
+    if m:  # share of the trailing N years spent inverted (persistence of inversion)
+        return _rolling((v < 0).astype(float).where(v.notna()), periods_for_months(f, 12 * int(m.group(1))), "mean")
+
     m = re.fullmatch(r"nopi(\d+)y", code)
     if m:  # Hamilton net oil price increase: log excess over the prior N-year peak
         n = periods_for_months(f, 12 * int(m.group(1)))

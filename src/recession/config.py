@@ -77,6 +77,8 @@ class Indicator:
     # the constrained boosted model (see docs/v2_plan.md)
     core: bool = True
     replaces: str | None = None
+    # a series that ended (kept as the early leg of a splice): never stale
+    discontinued: bool = False
     # put ALFRED first-release levels on one base across rebasings (train mode)
     chain_link: bool = True
     # source == "composite": breadth measures computed on the as-of panel
@@ -154,6 +156,7 @@ def _parse_indicator(d: dict) -> Indicator:
         real_time_from=d.get("real_time_from"),
         core=bool(d.get("core", True)),
         replaces=d.get("replaces"),
+        discontinued=bool(d.get("discontinued", False)),
         chain_link=bool(d.get("chain_link", True)),
         composite_kind=d.get("kind") if d.get("source") == "composite" else None,
         members=tuple(d.get("members", []) or []),
