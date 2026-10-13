@@ -147,6 +147,9 @@ def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
     elif ind.derive == "growth_gap":  # yoy growth of v0 minus yoy growth of v1, in points
         n = periods_for_months(ind.frequency, 12)
         value = 100.0 * ((a["v0"] / a["v0"].shift(n)) - (a["v1"] / a["v1"].shift(n)))
+    elif ind.derive == "wsum":  # fixed-weight sum of the inputs (e.g. ISM weights on survey components)
+        weights = [float(w) for w in ind.derive_params["weights"]]
+        value = sum(w * a[f"v{i}"] for i, w in enumerate(weights))
     elif ind.derive == "ntfs":
         # Near-term forward spread proxy (Engstrom-Sharpe): the 3-month rate
         # implied ~18 months ahead minus the spot bill, from the 2y/1y/3m

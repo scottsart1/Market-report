@@ -105,6 +105,11 @@ indicators:
       - {t: inv_share1y, risk: +1, desc: "Share of past year with inverted 10Y-3M curve"}
       - {t: resteep,    risk: +1, desc: "Curve re-steepening after inversion"}
       - {t: since_inv,  risk: -1, desc: "Time elapsed since last 10Y-3M inversion"}
+      - {t: lag6m,      risk: -1, desc: "10Y-3M spread six months ago"}
+      - {t: lag12m,     risk: -1, desc: "10Y-3M spread a year ago"}
+      - {t: min1y,      risk: -1, desc: "10Y-3M spread, 1-year low"}
+      - {t: invdepth1y, risk: +1, desc: "Average depth of 10Y-3M inversion over the past year"}
+      - {t: inv_share2y, risk: +1, desc: "Share of past two years with inverted 10Y-3M curve"}
 
   - id: SPREAD_10Y2Y
     name: 10Y-2Y Treasury Spread
@@ -148,6 +153,8 @@ indicators:
     transforms:
       - {t: chg6m,  risk: +1, desc: "Fed funds rate 6-month change (tightening pace)"}
       - {t: chg12m, risk: +1, desc: "Fed funds rate 12-month cumulative change"}
+      - {t: chg24m, risk: +1, desc: "Fed funds rate 24-month cumulative change"}
+      - {t: rise3y, risk: +1, desc: "Fed funds rate rise from its 3-year low (cumulative tightening)"}
 
   - id: REAL_FFR
     name: Real Federal Funds Rate (vs core CPI)
@@ -224,6 +231,7 @@ indicators:
     frequency: w
     publication_lag_days: 5
     vintage: true
+    real_time_from: "2011-05-27"   # index created 2011; earlier values are backcasts
     tier: 1
     license: public
     transforms:
@@ -273,7 +281,7 @@ indicators:
     category: credit
     source: fred
     frequency: q
-    publication_lag_days: 40
+    publication_lag_days: -55   # survey released ~55 days before its quarter ends
     vintage: true
     tier: 1
     license: public
@@ -286,7 +294,7 @@ indicators:
     category: credit
     source: fred
     frequency: q
-    publication_lag_days: 75
+    publication_lag_days: 50
     vintage: true
     tier: 2
     license: public
@@ -471,6 +479,7 @@ indicators:
     publication_lag_days: 7
     vintage: true
     tier: 2
+    enabled: false   # replaced by LNS12300060 (prime-age ratio)
     license: public
     transforms:
       - {t: chg6m, risk: -1, desc: "Employment-population ratio 6-month change"}
@@ -571,6 +580,7 @@ indicators:
     frequency: m
     publication_lag_days: 24
     vintage: true
+    real_time_from: "2001-03-01"   # index created 2001; earlier values are backcasts
     tier: 1
     license: public
     transforms:
@@ -730,6 +740,7 @@ indicators:
     publication_lag_days: 37
     vintage: true
     tier: 2
+    enabled: false   # replaced by TOTALSL
     license: public
     transforms:
       - {t: yoy, risk: -1, desc: "Revolving consumer credit growth, year over year"}
@@ -861,8 +872,1161 @@ indicators:
 
 # Ground-truth label source. NEVER used as a model input; listed here only so
 # the pipeline fetches and health-checks it.
+  # =========================================================================
+  # v2 additions (docs/v2_plan.md, Stage 3). Series verified against the
+  # FRED/ALFRED API on 2026-10-12. core: false routes a series to the
+  # constrained boosted model only; real_time_from masks backcast history
+  # of re-estimated indices in training.
+  # =========================================================================
+
+  # ------------------------------------------------- curve & policy ----
+  - id: DFF
+    name: Effective Federal Funds Rate (daily)
+    category: policy
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: dpeak1y, risk: -1, desc: "Fed funds rate drop from its 1-year peak (cuts under way)"}
+
+  - id: T1YFF
+    name: 1-Year Treasury minus Fed Funds
+    category: rates
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "1-year yield minus fed funds (market-implied easing)"}
+      - {t: chg6m, risk: -1, desc: "1-year minus fed funds, 6-month change"}
+      - {t: inv_share1y, risk: 1, desc: "Share of past year with the 1-year yield below fed funds"}
+
+  - id: SPREAD_2Y_FF
+    name: 2Y Treasury minus Fed Funds
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DGS2, DFF]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "2-year yield minus fed funds (rate cuts priced in)"}
+      - {t: avg1m, risk: -1, desc: "2-year minus fed funds, 1-month average"}
+
+  - id: SPREAD_10Y_FF
+    name: 10Y Treasury minus Fed Funds
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DGS10, DFF]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "10-year yield minus fed funds"}
+
+  - id: SPREAD_3M_FF
+    name: 3-Month Bill minus Fed Funds
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DTB3, DFF]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "3-month bill minus fed funds (imminent cuts priced in)"}
+      - {t: avg1m, risk: -1, desc: "3-month bill minus fed funds, 1-month average"}
+
+  - id: SPREAD_5Y2Y
+    name: 5Y-2Y Treasury Spread
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DGS5, DGS2]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "5-year minus 2-year Treasury spread"}
+
+  - id: SPREAD_2Y3M
+    name: 2Y-3M Treasury Spread
+    category: rates
+    source: derived
+    derive: spread
+    inputs: [DGS2, DTB3]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "2-year minus 3-month Treasury spread"}
+
+  - id: NTFS
+    name: Near-Term Forward Spread (proxy)
+    category: rates
+    source: derived
+    derive: ntfs
+    inputs: [DGS2, DGS1, DTB3]
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "Near-term forward spread: 3-month rate ~18 months ahead minus today's (Engstrom-Sharpe)"}
+      - {t: avg1m, risk: -1, desc: "Near-term forward spread, 1-month average"}
+
+  - id: MICH
+    name: Michigan 1-Year Inflation Expectations
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 25
+    vintage: false
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: REAL_FFR_EXANTE
+    name: Ex-ante Real Fed Funds Rate (vs expected inflation)
+    category: policy
+    source: derived
+    derive: spread
+    inputs: [FEDFUNDS, MICH]
+    frequency: m
+    publication_lag_days: 25
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: 1, desc: "Fed funds minus households' expected inflation (real policy stance)"}
+      - {t: chg12m, risk: 1, desc: "Ex-ante real policy rate, 12-month change"}
+
+  - id: TAYLOR_GAP
+    name: Policy Rate minus Taylor-Rule Rate
+    category: policy
+    source: derived
+    derive: taylor_gap
+    inputs: [FEDFUNDS, CPILFESL, UNRATE]
+    frequency: m
+    publication_lag_days: 15
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: 1, desc: "Fed funds above the Taylor-rule rate (policy tighter than the rule)"}
+      - {t: chg12m, risk: 1, desc: "Taylor gap, 12-month change"}
+
+  - id: M2SL
+    name: M2 Money Stock
+    category: policy
+    source: fred
+    frequency: m
+    publication_lag_days: 26
+    vintage: true
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: REAL_M2
+    name: Real M2 (deflated by CPI)
+    category: policy
+    source: derived
+    derive: deflate
+    inputs: [M2SL, CPIAUCSL]
+    frequency: m
+    publication_lag_days: 26
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "Real money growth, year over year"}
+      - {t: ann6m, risk: -1, desc: "Real money growth, 6-month annualized"}
+
+  # ----------------------------------------------------- labor onset ----
+  - id: ICNSA
+    name: Initial Claims (not seasonally adjusted)
+    category: labor
+    source: fred
+    frequency: w
+    publication_lag_days: 5
+    vintage: true
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: ICNSA_4WK
+    name: Initial Claims NSA (4-week average)
+    category: labor
+    source: derived
+    derive: avg4w
+    inputs: [ICNSA]
+    frequency: w
+    publication_lag_days: 5
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: yoy, risk: 1, desc: "Unadjusted initial claims vs the same weeks a year earlier (immune to seasonal-factor revisions)"}
+
+  - id: IURSA
+    name: Insured Unemployment Rate
+    category: labor
+    source: fred
+    frequency: w
+    publication_lag_days: 12
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg3m, risk: 1, desc: "Insured unemployment rate, 3-month change"}
+      - {t: chg6m, risk: 1, desc: "Insured unemployment rate, 6-month change"}
+      - {t: pctile3y, risk: 1, desc: "Insured unemployment rate vs past 3 years"}
+
+  - id: IURSA_SAHM
+    name: Weekly Sahm Gap (insured unemployment rate)
+    category: labor
+    source: derived
+    derive: sahm
+    inputs: [IURSA]
+    frequency: w
+    publication_lag_days: 12
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: 1, desc: "13-week average insured unemployment rate minus its 1-year low"}
+
+  - id: U2RATE
+    name: Unemployment Rate, Job Losers (U-2)
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: chg3m, risk: 1, desc: "Job-loser unemployment rate, 3-month change"}
+      - {t: chg12m, risk: 1, desc: "Job-loser unemployment rate, 12-month change"}
+
+  - id: U2_SAHM
+    name: Sahm Gap on the Job-Loser Rate
+    category: labor
+    source: derived
+    derive: sahm
+    inputs: [U2RATE]
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: 1, desc: "3-month average job-loser rate minus its 12-month low"}
+
+  - id: LNS13023653
+    name: Unemployed on Temporary Layoff
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: 1, desc: "Workers on temporary layoff, year over year"}
+      - {t: pct3m, risk: 1, desc: "Workers on temporary layoff, 3-month change"}
+
+  - id: AWHI
+    name: Aggregate Weekly Hours Index (production workers)
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Aggregate hours worked, 3-month annualized growth"}
+      - {t: ann6m, risk: -1, desc: "Aggregate hours worked, 6-month annualized growth"}
+      - {t: accel3m, risk: -1, desc: "Aggregate hours growth acceleration"}
+
+  - id: USCONS
+    name: Construction Employment
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: ann6m, risk: -1, desc: "Construction employment, 6-month annualized growth"}
+      - {t: yoy, risk: -1, desc: "Construction employment, year over year"}
+
+  - id: LNS12300060
+    name: Employment-Population Ratio, 25-54
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 1
+    license: public
+    replaces: EMRATIO
+    transforms:
+      - {t: chg3m, risk: -1, desc: "Prime-age employment ratio, 3-month change"}
+      - {t: chg6m, risk: -1, desc: "Prime-age employment ratio, 6-month change"}
+
+  - id: CE16OV
+    name: Employment Level (household survey)
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Household employment, 3-month annualized growth"}
+
+  - id: EMELASA
+    name: Employment-to-Non-Employment Transition Rate (layoffs)
+    category: labor
+    source: fred
+    frequency: m
+    publication_lag_days: 12
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: avg3m, risk: 1, desc: "Layoff transition rate, 3-month average"}
+      - {t: chg6m, risk: 1, desc: "Layoff transition rate, 6-month change"}
+
+  # --------------------------------------------------------- surveys ----
+  # Philadelphia Fed Business Outlook Survey: released the third Thursday
+  # of the reference month, i.e. ~11 days BEFORE the month ends.
+  - id: GACDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: Current Activity"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "Philadelphia Fed current activity index"}
+      - {t: avg3m, risk: -1, desc: "Philadelphia Fed current activity, 3-month average"}
+      - {t: chg6m, risk: -1, desc: "Philadelphia Fed current activity, 6-month change"}
+
+  - id: NOCDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: New Orders"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Philadelphia Fed new orders index"}
+      - {t: avg3m, risk: -1, desc: "Philadelphia Fed new orders, 3-month average"}
+
+  - id: NECDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: Employment"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Philadelphia Fed employment index"}
+      - {t: avg3m, risk: -1, desc: "Philadelphia Fed employment, 3-month average"}
+
+  - id: GAFDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: Future Activity"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Philadelphia Fed expected activity (6 months ahead)"}
+
+  - id: SHCDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: Shipments"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: DTCDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: Delivery Times"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: IVCDFSA066MSFRBPHI
+    name: "Philly Fed Manufacturing: Inventories"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: PHILLY_ISM
+    name: ISM-weighted Philly Fed Composite
+    category: survey
+    source: derived
+    derive: wsum
+    inputs: [NOCDFSA066MSFRBPHI, SHCDFSA066MSFRBPHI, NECDFSA066MSFRBPHI, DTCDFSA066MSFRBPHI, IVCDFSA066MSFRBPHI]
+    derive_params: {weights: [0.30, 0.25, 0.20, 0.15, 0.10]}
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "PMI-style composite of Philadelphia Fed components (ISM weights)"}
+      - {t: avg3m, risk: -1, desc: "Philly PMI proxy, 3-month average"}
+      - {t: chg6m, risk: -1, desc: "Philly PMI proxy, 6-month change"}
+
+  - id: PHI_EXPECT_GAP
+    name: Philly Fed Expectations minus Current Activity
+    category: survey
+    source: derived
+    derive: spread
+    inputs: [GAFDFSA066MSFRBPHI, GACDFSA066MSFRBPHI]
+    frequency: m
+    publication_lag_days: -11
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Expected minus current activity (firms expecting a turn)"}
+
+  - id: GACDISA066MSFRBNY
+    name: "Empire State Manufacturing: General Activity"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -15
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Empire State general activity index"}
+      - {t: avg3m, risk: -1, desc: "Empire State activity, 3-month average"}
+
+  - id: BACTSAMFRBDAL
+    name: "Dallas Fed Manufacturing: Business Activity"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -3
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Dallas Fed manufacturing activity index"}
+
+  - id: TSSOSBACTSAMFRBDAL
+    name: "Dallas Fed Services: Business Activity"
+    category: survey
+    source: fred
+    frequency: m
+    publication_lag_days: -2
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Dallas Fed services activity index"}
+
+  # ---------------------------------------------------------- credit ----
+  - id: CP3M
+    name: 3-Month Commercial Paper Rate (to 1997)
+    category: credit
+    source: fred
+    frequency: m
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: CPN3M
+    name: 90-Day AA Nonfinancial Commercial Paper Rate
+    category: credit
+    source: fred
+    frequency: m
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: SPREAD_CP3M_TB3
+    name: Paper-Bill Spread (old series)
+    category: credit
+    source: derived
+    derive: spread
+    inputs: [CP3M, DTB3]
+    frequency: m
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: SPREAD_CPN3M_TB3
+    name: Paper-Bill Spread (new series)
+    category: credit
+    source: derived
+    derive: spread
+    inputs: [CPN3M, DTB3]
+    frequency: m
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: PAPER_BILL
+    name: Paper-Bill Spread (spliced, 1971-)
+    category: credit
+    source: derived
+    derive: splice
+    inputs: [SPREAD_CP3M_TB3, SPREAD_CPN3M_TB3]
+    derive_params: {switch_date: "1997-09-01", offset: auto}
+    frequency: m
+    publication_lag_days: 1
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: 1, desc: "Commercial paper minus Treasury bill spread (funding stress)"}
+      - {t: chg3m, risk: 1, desc: "Paper-bill spread, 3-month change"}
+
+  # SLOOS questions are dated by FRED at the quarter of the survey and
+  # released ~55 days before that quarter ends (period-start convention).
+  - id: DRIWCIL
+    name: "SLOOS: Willingness to Make Consumer Loans (1982-)"
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: -55
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: SUBLPDCLIWXWFRNQ
+    name: "SLOOS: Willingness to Make Consumer Loans (1966-2017)"
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: -55
+    vintage: false
+    tier: 1
+    license: public
+    transforms: []
+
+  - id: WILLING_LEND
+    name: Banks' Willingness to Lend to Consumers (spliced, 1966-)
+    category: credit
+    source: derived
+    derive: splice
+    inputs: [SUBLPDCLIWXWFRNQ, DRIWCIL]
+    derive_params: {switch_date: "1982-04-01", offset: auto}
+    frequency: q
+    publication_lag_days: -55
+    vintage: false
+    tier: 1
+    license: public
+    transforms:
+      - {t: level, risk: -1, desc: "Net share of banks more willing to make consumer loans"}
+      - {t: chg12m, risk: -1, desc: "Willingness to lend, 4-quarter change"}
+
+  - id: DRSDCILM
+    name: "SLOOS: Demand for C&I Loans (large firms)"
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: -55
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Net share of banks reporting stronger C&I loan demand"}
+      - {t: chg12m, risk: -1, desc: "C&I loan demand, 4-quarter change"}
+
+  - id: SUBLPDMOSXWBNQ
+    name: "SLOOS: Standards Tightened, All Loan Categories"
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: -55
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: 1, desc: "Net share of banks tightening standards across all loans"}
+      - {t: chg12m, risk: 1, desc: "All-loan tightening, 4-quarter change"}
+
+  - id: BUSLOANS
+    name: Commercial and Industrial Loans
+    category: credit
+    source: fred
+    frequency: m
+    publication_lag_days: 12
+    vintage: true
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: ann6m, risk: 1, desc: "C&I loan growth, 6-month annualized (late-cycle credit boom)"}
+      - {t: accel3m, risk: -1, desc: "C&I loan growth acceleration (a sudden stop is the risk)"}
+
+  - id: DRBLACBS
+    name: Delinquency Rate on Business Loans
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: 50
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: chg12m, risk: 1, desc: "Business-loan delinquency rate, 4-quarter change"}
+      - {t: level, risk: 1, desc: "Business-loan delinquency rate"}
+
+  - id: CORCCACBS
+    name: Charge-Off Rate on Credit Card Loans
+    category: credit
+    source: fred
+    frequency: q
+    publication_lag_days: 50
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: chg12m, risk: 1, desc: "Credit-card charge-off rate, 4-quarter change"}
+
+  # Fed research series (re-estimated over the full sample every month):
+  # no vintages, masked before first publication in training. The file's
+  # est_prob column is a fitted recession probability and is never loaded.
+  - id: EBP
+    name: Excess Bond Premium (Gilchrist-Zakrajsek)
+    category: credit
+    source: url
+    url: "https://www.federalreserve.gov/econres/notes/feds-notes/ebp_csv.csv"
+    url_date_col: date
+    url_value_col: ebp
+    frequency: m
+    publication_lag_days: 10
+    vintage: false
+    real_time_from: "2016-06-01"
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: 1, desc: "Excess bond premium (corporate credit risk appetite)"}
+      - {t: chg3m, risk: 1, desc: "Excess bond premium, 3-month change"}
+      - {t: z10y, risk: 1, desc: "Excess bond premium vs 10-year norm"}
+
+  - id: GZ_SPREAD
+    name: Gilchrist-Zakrajsek Credit Spread
+    category: credit
+    source: url
+    url: "https://www.federalreserve.gov/econres/notes/feds-notes/ebp_csv.csv"
+    url_date_col: date
+    url_value_col: gz_spread
+    frequency: m
+    publication_lag_days: 10
+    vintage: false
+    real_time_from: "2016-06-01"
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: chg12m, risk: 1, desc: "GZ corporate credit spread, 12-month change"}
+
+  - id: NFCICREDIT
+    name: "Chicago Fed NFCI: Credit Subindex"
+    category: credit
+    source: fred
+    frequency: w
+    publication_lag_days: 5
+    vintage: true
+    real_time_from: "2011-05-27"
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: chg6m, risk: 1, desc: "NFCI credit conditions, 6-month tightening"}
+
+  # ---------------------------------------- housing, consumer, activity ----
+  - id: PERMIT1
+    name: Single-Family Building Permits
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 1
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "Single-family permits, year over year"}
+      - {t: ann6m, risk: -1, desc: "Single-family permits, 6-month annualized"}
+
+  - id: MSACSR
+    name: Months' Supply of New Houses
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 25
+    vintage: true
+    tier: 1
+    license: public
+    transforms:
+      - {t: avg3m, risk: 1, desc: "Months' supply of new homes, 3-month average"}
+      - {t: chg6m, risk: 1, desc: "Months' supply of new homes, 6-month change"}
+      - {t: z10y, risk: 1, desc: "Months' supply vs 10-year norm"}
+
+  - id: PERMITNE
+    name: Building Permits, Northeast
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "Northeast permits, year over year"}
+
+  - id: PERMITMW
+    name: Building Permits, Midwest
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "Midwest permits, year over year"}
+
+  - id: PERMITS
+    name: Building Permits, South
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "South permits, year over year"}
+
+  - id: PERMITW
+    name: Building Permits, West
+    category: housing
+    source: fred
+    frequency: m
+    publication_lag_days: 18
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "West permits, year over year"}
+
+  - id: USSTHPI
+    name: FHFA All-Transactions House Price Index
+    category: housing
+    source: fred
+    frequency: q
+    publication_lag_days: 56
+    vintage: true
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: REAL_HPI
+    name: Real House Prices (FHFA deflated by CPI)
+    category: housing
+    source: derived
+    derive: deflate
+    inputs: [USSTHPI, CPIAUCSL]
+    frequency: q
+    publication_lag_days: 56
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "Real house prices, year over year", horizons: [365]}
+      - {t: accel3m, risk: -1, desc: "Real house price growth acceleration", horizons: [365]}
+
+  - id: ADXTNO
+    name: Core Capital Goods Orders (ex aircraft, ex defense)
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 26
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Core capital goods orders, 3-month annualized growth"}
+      - {t: yoy, risk: -1, desc: "Core capital goods orders, year over year"}
+
+  - id: IPMAN
+    name: "Industrial Production: Manufacturing"
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 16
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Manufacturing output, 3-month annualized growth"}
+      - {t: ann6m, risk: -1, desc: "Manufacturing output, 6-month annualized growth"}
+
+  - id: IPDCONGD
+    name: "Industrial Production: Durable Consumer Goods"
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 16
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Durable consumer goods output, 3-month annualized growth"}
+
+  - id: GDPC1
+    name: Real GDP
+    category: real_activity
+    source: fred
+    frequency: q
+    publication_lag_days: 30
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: ann3m, risk: -1, desc: "Real GDP growth, quarter over quarter annualized (advance estimate)"}
+      - {t: yoy, risk: -1, desc: "Real GDP, year over year"}
+
+  - id: CFNAIDIFF
+    name: "Chicago Fed National Activity: Diffusion Index"
+    category: real_activity
+    source: fred
+    frequency: m
+    publication_lag_days: 24
+    vintage: true
+    real_time_from: "2001-03-01"
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: level, risk: -1, desc: "Share of activity indicators improving (CFNAI diffusion)"}
+      - {t: chg6m, risk: -1, desc: "CFNAI diffusion, 6-month change"}
+
+  - id: TOTALSL
+    name: Total Consumer Credit
+    category: consumer
+    source: fred
+    frequency: m
+    publication_lag_days: 37
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    replaces: REVOLSL
+    transforms:
+      - {t: yoy, risk: 1, desc: "Consumer credit growth, year over year (fast growth precedes downturns)"}
+      - {t: accel3m, risk: -1, desc: "Consumer credit growth acceleration (a sudden stop is the risk)"}
+
+  - id: MTSR133FMS
+    name: Federal Government Receipts (monthly, unrevised)
+    category: fiscal
+    source: fred
+    frequency: m
+    publication_lag_days: 12
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: -1, desc: "Federal receipts vs the same month a year earlier"}
+
+  - id: WPU03T15M05
+    name: "PPI: Industrial Commodities less Fuels"
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 14
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: pct6m, risk: -1, desc: "Industrial commodity prices, 6-month change"}
+      - {t: yoy, risk: -1, desc: "Industrial commodity prices, year over year"}
+
+  - id: WPSFD49207
+    name: "PPI: Finished Goods"
+    category: inflation
+    source: fred
+    frequency: m
+    publication_lag_days: 14
+    vintage: true
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: 1, desc: "Finished-goods producer prices, year over year"}
+      - {t: infl_accel, risk: 1, desc: "Producer price acceleration"}
+
+  - id: TWEXBMTH
+    name: Trade-Weighted Dollar, Broad (1973-2019)
+    category: trade
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: false
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: TWEXBGSMTH
+    name: Nominal Broad Dollar Index (2006-)
+    category: trade
+    source: fred
+    frequency: m
+    publication_lag_days: 7
+    vintage: false
+    tier: 2
+    license: public
+    transforms: []
+
+  - id: USD_BROAD
+    name: Broad Dollar Index (spliced, 1973-)
+    category: trade
+    source: derived
+    derive: splice
+    inputs: [TWEXBMTH, TWEXBGSMTH]
+    derive_params: {switch_date: "2006-01-01", offset: auto}
+    frequency: m
+    publication_lag_days: 7
+    vintage: false
+    tier: 2
+    license: public
+    core: false
+    transforms:
+      - {t: yoy, risk: 1, desc: "Broad dollar, year over year (dollar strength tightens global conditions)"}
+      - {t: pct6m, risk: 1, desc: "Broad dollar, 6-month change"}
+
+  - id: VXOCLS
+    name: CBOE S&P 100 Volatility (VXO, 1986-2021)
+    category: markets
+    source: fred
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 2
+    license: fred_full
+    transforms: []
+
+  - id: VIX_SPLICED
+    name: Implied Volatility (VXO to 1990, VIX after)
+    category: markets
+    source: derived
+    derive: splice
+    inputs: [VXOCLS, VIXCLS]
+    derive_params: {switch_date: "1990-01-02", offset: auto}
+    frequency: d
+    publication_lag_days: 1
+    vintage: false
+    tier: 2
+    license: fred_full
+    core: false
+    transforms:
+      - {t: avg1m, risk: 1, desc: "Implied volatility, 1-month average (1986-)"}
+      - {t: pctile3y, risk: 1, desc: "Implied volatility vs past 3 years"}
+
+  - id: USEPUNEWSINDXM
+    name: Economic Policy Uncertainty, Historical News Index
+    category: markets
+    source: fred
+    frequency: m
+    publication_lag_days: 3
+    vintage: false
+    tier: 2
+    license: fred_full
+    core: false
+    transforms:
+      - {t: avg3m, risk: 1, desc: "News-based policy uncertainty, 3-month average"}
+      - {t: pctile3y, risk: 1, desc: "Policy uncertainty vs past 3 years"}
+
 labels:
   - id: USREC
     name: NBER Recession Indicator (monthly)
     source: fred
     frequency: m
+
+# ---------------------------------------------------------------------------
+# Breadth composites (src/recession/composites.py): fixed membership of
+# long-history features, computed on the as-of panel with trailing windows.
+# ---------------------------------------------------------------------------
+composites:
+  - id: BREADTH_STRESS
+    name: Breadth of Recessionary Readings
+    kind: breadth_pctile
+    category: composite
+    members: [SPREAD_10Y3M__level, T1YFF__level, FEDFUNDS__chg24m, BAA10YM__chg6m,
+              BAA_AAA__level, PAPER_BILL__level, MTG_SPREAD__level, WILLING_LEND__level,
+              ICNSA_4WK__yoy, IURSA__chg6m, U2RATE__chg12m, LNS13023653__yoy,
+              AWHI__ann6m, AWHMAN__chg6m, TEMPHELPS__yoy, PAYEMS__ann6m,
+              PERMIT1__yoy, HOUST__yoy, MSACSR__z10y, GACDFSA066MSFRBPHI__avg3m,
+              NASDAQCOM__ret6m, UMCSENT__chg6m, INDPRO__ann6m, CUMFNS__chg6m]
+    transforms:
+      - {t: level, risk: 1, desc: "Mean recessionary percentile across 24 long-history indicators"}
+      - {t: chg3m, risk: 1, desc: "Breadth of stress, 3-month change"}
+      - {t: chg6m, risk: 1, desc: "Breadth of stress, 6-month change"}
+
+  - id: LABOR_ONSET_DIFF
+    name: Labor-Market Onset Rules Triggered
+    kind: rule_share
+    category: composite
+    rules:
+      - {feature: ICNSA_4WK__yoy, op: ">", value: 0.10}
+      - {feature: IURSA__chg3m, op: ">", value: 0.2}
+      - {feature: U2_SAHM__level, op: ">", value: 0.3}
+      - {feature: SAHM_RT__level, op: ">", value: 0.3}
+      - {feature: LNS13023653__yoy, op: ">", value: 0.15}
+      - {feature: AWHI__ann3m, op: "<", value: 0.0}
+      - {feature: AWHMAN__chg6m, op: "<", value: -0.3}
+      - {feature: PAYEMS__ann3m, op: "<", value: 0.005}
+      - {feature: TEMPHELPS__yoy, op: "<", value: 0.0}
+      - {feature: USCONS__ann6m, op: "<", value: 0.0}
+      - {feature: NECDFSA066MSFRBPHI__avg3m, op: "<", value: 0.0}
+    transforms:
+      - {t: level, risk: 1, desc: "Share of pre-specified labor-onset rules currently triggered"}
+      - {t: chg3m, risk: 1, desc: "Labor-onset rules triggered, 3-month change"}
+
+  - id: CURVE_INV_BREADTH
+    name: Yield-Curve Inversion Breadth
+    kind: inv_share
+    category: composite
+    members: [SPREAD_10Y3M__level, SPREAD_10Y2Y__level, SPREAD_5Y2Y__level, SPREAD_2Y3M__level,
+              T1YFF__level, SPREAD_3M_FF__level, SPREAD_10Y_FF__level]
+    transforms:
+      - {t: level, risk: 1, desc: "Share of seven curve pairs currently inverted"}
+      - {t: avg12m, risk: 1, desc: "Inversion breadth, 1-year average (persistence)"}
+
+  - id: HOUSING_BREADTH
+    name: Housing Indicators Deteriorating
+    kind: rule_share
+    category: composite
+    rules:
+      - {feature: PERMIT1__yoy, op: "<", value: 0.0}
+      - {feature: HOUST__yoy, op: "<", value: 0.0}
+      - {feature: HSN1F__yoy, op: "<", value: 0.0}
+      - {feature: MSACSR__z10y, op: ">", value: 1.0}
+      - {feature: USCONS__ann6m, op: "<", value: 0.0}
+      - {feature: REAL_HPI__yoy, op: "<", value: 0.0}
+      - {feature: PERMITNE__yoy, op: "<", value: 0.0}
+      - {feature: PERMITMW__yoy, op: "<", value: 0.0}
+      - {feature: PERMITS__yoy, op: "<", value: 0.0}
+      - {feature: PERMITW__yoy, op: "<", value: 0.0}
+    transforms:
+      - {t: level, risk: 1, desc: "Share of housing indicators deteriorating"}
+      - {t: chg6m, risk: 1, desc: "Housing breadth, 6-month change"}
+
+  - id: CREDIT_SUPPLY_STRESS
+    name: Credit-Supply Stress (raw components)
+    kind: breadth_pctile
+    category: composite
+    members: [BAA_AAA__level, BAA10YM__chg6m, PAPER_BILL__level, MTG_SPREAD__level,
+              WILLING_LEND__level, DRTSCILM__level, BUSLOANS__accel3m, VIX_SPLICED__avg1m, CPFF__avg1m]
+    transforms:
+      - {t: level, risk: 1, desc: "Mean stress percentile across credit-supply components"}
+      - {t: chg3m, risk: 1, desc: "Credit-supply stress, 3-month change"}
+
+  - id: COINC_BIG4
+    name: Coincident Momentum (NBER big-four plus hours)
+    kind: zmean
+    category: composite
+    members: [PAYEMS__ann3m, INDPRO__ann3m, W875RX1__ann6m, CMRMTSPL__ann6m, AWHI__ann3m, CE16OV__ann3m]
+    transforms:
+      - {t: level, risk: -1, desc: "Standardized momentum of the NBER coincident set"}
+      - {t: chg3m, risk: -1, desc: "Coincident momentum, 3-month change"}

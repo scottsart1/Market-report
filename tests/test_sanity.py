@@ -29,7 +29,8 @@ def test_config_features_have_metadata():
         assert t.risk in (-1, 1), name
         assert len(t.desc) > 5, name
         assert ind.frequency in ("d", "w", "m", "q")
-        assert ind.publication_lag_days >= 0
+        # surveys and SLOOS are released before their reference period ends
+        assert -60 <= ind.publication_lag_days <= 120, name
 
 
 def test_monthly_availability_lag():
@@ -81,7 +82,7 @@ def test_stale_data_flagged():
     now = pd.Timestamp("2026-08-25")
     fetched = {}
     for ind in cfg.indicators:
-        if ind.source != "fred" or not ind.enabled:
+        if not ind.fetched or not ind.enabled:
             continue
         if ind.id == "ICSA":  # weekly series 100 days old -> stale
             fetched[ind.id] = _mk_result(ind.id, now - pd.Timedelta(days=100))
