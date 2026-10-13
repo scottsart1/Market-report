@@ -194,3 +194,27 @@ a block. Round 2 tests the pre-specified batches one at a time on top of
 the v1 series + composites (`s3_ref_comp`, 117 features): curve & policy
 (12 series), labor onset (12), surveys (12), credit (16),
 housing/consumer/activity/trade (24).
+
+## Stage 3 result, round 2 (2026-10-13, reference `s3_ref_comp`: v1 series + composites, 117 features)
+
+| batch | features | Brier better (event folds) | log loss better | bootstrap share 90d / 365d | onsets below 3x base rate | pooled Brier | 1y Brier | verdict |
+|---|---|---|---|---|---|---|---|---|
+| curve & policy (12 series) | 136 | 4/5 | 5/5 | 94% / 42% | none | 0.0546 | 0.0964 | fails 4 (1-year share 42%) |
+| labor onset (12) | 137 | 4/5 | 5/5 | 34% / 49% | none | 0.0582 | 0.0962 | fails 2 |
+| surveys (12) | 133 | 3/5 | 3/5 | 91% / 21% | 2020 (0.09) | 0.0537 | 0.0968 | fails 1, 3, 4 |
+| credit (16) | 135 | 1/5 | 2/5 | 92% / 14% | none | 0.0530 | 0.1003 | fails 1, 4 |
+| housing / consumer / activity / trade (24) | 150 | 1/5 | 2/5 | 1% / 36% | none | 0.0585 | 0.0973 | fails 1, 2, 4 |
+
+**Decision: no wide batch is adopted as model features.** The curve &
+policy batch comes closest (better on both proper scores in 4-5 event
+folds and in 94% of 90-day resamples) and fails only because the 1-year
+model is marginally worse (+0.0004 Brier, 42% of resamples better); the
+rule's threshold is 50%, so it stays out. The 76 rejected series remain in
+the data pipeline with `modeled: false`: they are fetched, shown in the
+indicator table and feed the six adopted composites (which carry their
+information in fixed, pre-specified form), but no model sees them as
+individual features.
+
+Final v2 feature set: the v1 series under the Stage-1 fixes and patched
+transforms, plus the six composites — 117 modeled features out of 222
+panel columns from 143 series.

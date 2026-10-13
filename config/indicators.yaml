@@ -884,6 +884,7 @@ indicators:
     name: Effective Federal Funds Rate (daily)
     category: policy
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: d
     publication_lag_days: 1
     vintage: false
@@ -897,6 +898,7 @@ indicators:
     name: 1-Year Treasury minus Fed Funds
     category: rates
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: d
     publication_lag_days: 1
     vintage: false
@@ -911,6 +913,7 @@ indicators:
     name: 2Y Treasury minus Fed Funds
     category: rates
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [DGS2, DFF]
     frequency: d
@@ -926,6 +929,7 @@ indicators:
     name: 10Y Treasury minus Fed Funds
     category: rates
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [DGS10, DFF]
     frequency: d
@@ -941,6 +945,7 @@ indicators:
     name: 3-Month Bill minus Fed Funds
     category: rates
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [DTB3, DFF]
     frequency: d
@@ -957,6 +962,7 @@ indicators:
     name: 5Y-2Y Treasury Spread
     category: rates
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [DGS5, DGS2]
     frequency: d
@@ -972,6 +978,7 @@ indicators:
     name: 2Y-3M Treasury Spread
     category: rates
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [DGS2, DTB3]
     frequency: d
@@ -987,6 +994,7 @@ indicators:
     name: Near-Term Forward Spread (proxy)
     category: rates
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: ntfs
     inputs: [DGS2, DGS1, DTB3]
     frequency: d
@@ -1002,6 +1010,7 @@ indicators:
     name: Michigan 1-Year Inflation Expectations
     category: inflation
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 25
     vintage: false
@@ -1013,6 +1022,7 @@ indicators:
     name: Ex-ante Real Fed Funds Rate (vs expected inflation)
     category: policy
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [FEDFUNDS, MICH]
     frequency: m
@@ -1029,6 +1039,7 @@ indicators:
     name: Policy Rate minus Taylor-Rule Rate
     category: policy
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: taylor_gap
     inputs: [FEDFUNDS, CPILFESL, UNRATE]
     frequency: m
@@ -1045,6 +1056,7 @@ indicators:
     name: M2 Money Stock
     category: policy
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 26
     vintage: true
@@ -1056,6 +1068,7 @@ indicators:
     name: Real M2 (deflated by CPI)
     category: policy
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: deflate
     inputs: [M2SL, CPIAUCSL]
     frequency: m
@@ -1073,6 +1086,7 @@ indicators:
     name: Initial Claims (not seasonally adjusted)
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: w
     publication_lag_days: 5
     vintage: true
@@ -1084,6 +1098,7 @@ indicators:
     name: Initial Claims NSA (4-week average)
     category: labor
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: avg4w
     inputs: [ICNSA]
     frequency: w
@@ -1098,6 +1113,7 @@ indicators:
     name: Insured Unemployment Rate
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: w
     publication_lag_days: 12
     vintage: true
@@ -1112,6 +1128,7 @@ indicators:
     name: Weekly Sahm Gap (insured unemployment rate)
     category: labor
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: sahm
     inputs: [IURSA]
     frequency: w
@@ -1126,6 +1143,7 @@ indicators:
     name: Unemployment Rate, Job Losers (U-2)
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: true
@@ -1139,6 +1157,7 @@ indicators:
     name: Sahm Gap on the Job-Loser Rate
     category: labor
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: sahm
     inputs: [U2RATE]
     frequency: m
@@ -1153,6 +1172,7 @@ indicators:
     name: Unemployed on Temporary Layoff
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: true
@@ -1167,6 +1187,7 @@ indicators:
     name: Aggregate Weekly Hours Index (production workers)
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: true
@@ -1181,6 +1202,7 @@ indicators:
     name: Construction Employment
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: true
@@ -1195,6 +1217,7 @@ indicators:
     name: Employment-Population Ratio, 25-54
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: true
@@ -1209,6 +1232,7 @@ indicators:
     name: Employment Level (household survey)
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: true
@@ -1222,6 +1246,7 @@ indicators:
     name: Employment-to-Non-Employment Transition Rate (layoffs)
     category: labor
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 12
     vintage: false
@@ -1239,6 +1264,7 @@ indicators:
     name: "Philly Fed Manufacturing: Current Activity"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1253,6 +1279,7 @@ indicators:
     name: "Philly Fed Manufacturing: New Orders"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1267,6 +1294,7 @@ indicators:
     name: "Philly Fed Manufacturing: Employment"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1281,6 +1309,7 @@ indicators:
     name: "Philly Fed Manufacturing: Future Activity"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1294,6 +1323,7 @@ indicators:
     name: "Philly Fed Manufacturing: Shipments"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1305,6 +1335,7 @@ indicators:
     name: "Philly Fed Manufacturing: Delivery Times"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1316,6 +1347,7 @@ indicators:
     name: "Philly Fed Manufacturing: Inventories"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -11
     vintage: true
@@ -1327,6 +1359,7 @@ indicators:
     name: ISM-weighted Philly Fed Composite
     category: survey
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: wsum
     inputs: [NOCDFSA066MSFRBPHI, SHCDFSA066MSFRBPHI, NECDFSA066MSFRBPHI, DTCDFSA066MSFRBPHI, IVCDFSA066MSFRBPHI]
     derive_params: {weights: [0.30, 0.25, 0.20, 0.15, 0.10]}
@@ -1344,6 +1377,7 @@ indicators:
     name: Philly Fed Expectations minus Current Activity
     category: survey
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [GAFDFSA066MSFRBPHI, GACDFSA066MSFRBPHI]
     frequency: m
@@ -1359,6 +1393,7 @@ indicators:
     name: "Empire State Manufacturing: General Activity"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -15
     vintage: true
@@ -1373,6 +1408,7 @@ indicators:
     name: "Dallas Fed Manufacturing: Business Activity"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -3
     vintage: true
@@ -1386,6 +1422,7 @@ indicators:
     name: "Dallas Fed Services: Business Activity"
     category: survey
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: -2
     vintage: true
@@ -1400,6 +1437,7 @@ indicators:
     name: 3-Month Commercial Paper Rate (to 1997)
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     discontinued: true
     frequency: m
     publication_lag_days: 1
@@ -1412,6 +1450,7 @@ indicators:
     name: 90-Day AA Nonfinancial Commercial Paper Rate
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 1
     vintage: false
@@ -1423,6 +1462,7 @@ indicators:
     name: Paper-Bill Spread (old series)
     category: credit
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [CP3M, DTB3]
     frequency: m
@@ -1436,6 +1476,7 @@ indicators:
     name: Paper-Bill Spread (new series)
     category: credit
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: spread
     inputs: [CPN3M, DTB3]
     frequency: m
@@ -1449,6 +1490,7 @@ indicators:
     name: Paper-Bill Spread (spliced, 1971-)
     category: credit
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: splice
     inputs: [SPREAD_CP3M_TB3, SPREAD_CPN3M_TB3]
     derive_params: {switch_date: "1997-09-01", offset: auto}
@@ -1467,6 +1509,7 @@ indicators:
     name: "SLOOS: Willingness to Make Consumer Loans (1982-)"
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: -55
     vintage: false
@@ -1478,6 +1521,7 @@ indicators:
     name: "SLOOS: Willingness to Make Consumer Loans (1966-2017)"
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     discontinued: true
     frequency: q
     publication_lag_days: -55
@@ -1490,6 +1534,7 @@ indicators:
     name: Banks' Willingness to Lend to Consumers (spliced, 1966-)
     category: credit
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: splice
     inputs: [SUBLPDCLIWXWFRNQ, DRIWCIL]
     derive_params: {switch_date: "1982-04-01", offset: auto}
@@ -1506,6 +1551,7 @@ indicators:
     name: "SLOOS: Demand for C&I Loans (large firms)"
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: -55
     vintage: false
@@ -1520,6 +1566,7 @@ indicators:
     name: "SLOOS: Standards Tightened, All Loan Categories"
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: -55
     vintage: false
@@ -1534,6 +1581,7 @@ indicators:
     name: Commercial and Industrial Loans
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 12
     vintage: true
@@ -1548,6 +1596,7 @@ indicators:
     name: Delinquency Rate on Business Loans
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: 50
     vintage: true
@@ -1562,6 +1611,7 @@ indicators:
     name: Charge-Off Rate on Credit Card Loans
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: 50
     vintage: true
@@ -1578,6 +1628,7 @@ indicators:
     name: Excess Bond Premium (Gilchrist-Zakrajsek)
     category: credit
     source: url
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     core: false
     url: "https://www.federalreserve.gov/econres/notes/feds-notes/ebp_csv.csv"
     url_date_col: date
@@ -1598,6 +1649,7 @@ indicators:
     name: Gilchrist-Zakrajsek Credit Spread
     category: credit
     source: url
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     core: false
     url: "https://www.federalreserve.gov/econres/notes/feds-notes/ebp_csv.csv"
     url_date_col: date
@@ -1616,6 +1668,7 @@ indicators:
     name: "Chicago Fed NFCI: Credit Subindex"
     category: credit
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: w
     publication_lag_days: 5
     vintage: true
@@ -1631,6 +1684,7 @@ indicators:
     name: Single-Family Building Permits
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 18
     vintage: true
@@ -1645,6 +1699,7 @@ indicators:
     name: Months' Supply of New Houses
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 25
     vintage: true
@@ -1659,6 +1714,7 @@ indicators:
     name: Building Permits, Northeast
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 18
     vintage: true
@@ -1672,6 +1728,7 @@ indicators:
     name: Building Permits, Midwest
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 18
     vintage: true
@@ -1685,6 +1742,7 @@ indicators:
     name: Building Permits, South
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 18
     vintage: true
@@ -1698,6 +1756,7 @@ indicators:
     name: Building Permits, West
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 18
     vintage: true
@@ -1711,6 +1770,7 @@ indicators:
     name: FHFA All-Transactions House Price Index
     category: housing
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: 56
     vintage: true
@@ -1722,6 +1782,7 @@ indicators:
     name: Real House Prices (FHFA deflated by CPI)
     category: housing
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: deflate
     inputs: [USSTHPI, CPIAUCSL]
     frequency: q
@@ -1738,6 +1799,7 @@ indicators:
     name: Core Capital Goods Orders (ex aircraft, ex defense)
     category: real_activity
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 26
     vintage: true
@@ -1752,6 +1814,7 @@ indicators:
     name: "Industrial Production: Manufacturing"
     category: real_activity
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 16
     vintage: true
@@ -1766,6 +1829,7 @@ indicators:
     name: "Industrial Production: Durable Consumer Goods"
     category: real_activity
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 16
     vintage: true
@@ -1779,6 +1843,7 @@ indicators:
     name: Real GDP
     category: real_activity
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: q
     publication_lag_days: 30
     vintage: true
@@ -1793,6 +1858,7 @@ indicators:
     name: "Chicago Fed National Activity: Diffusion Index"
     category: real_activity
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 24
     vintage: true
@@ -1808,6 +1874,7 @@ indicators:
     name: Total Consumer Credit
     category: consumer
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 37
     vintage: true
@@ -1823,6 +1890,7 @@ indicators:
     name: Federal Government Receipts (monthly, unrevised)
     category: fiscal
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 12
     vintage: false
@@ -1836,6 +1904,7 @@ indicators:
     name: "PPI: Industrial Commodities less Fuels"
     category: inflation
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 14
     vintage: true
@@ -1850,6 +1919,7 @@ indicators:
     name: "PPI: Finished Goods"
     category: inflation
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 14
     vintage: true
@@ -1864,6 +1934,7 @@ indicators:
     name: Trade-Weighted Dollar, Broad (1973-2019)
     category: trade
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     discontinued: true
     frequency: m
     publication_lag_days: 7
@@ -1876,6 +1947,7 @@ indicators:
     name: Nominal Broad Dollar Index (2006-)
     category: trade
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 7
     vintage: false
@@ -1887,6 +1959,7 @@ indicators:
     name: Broad Dollar Index (spliced, 1973-)
     category: trade
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: splice
     inputs: [TWEXBMTH, TWEXBGSMTH]
     derive_params: {switch_date: "2006-01-01", offset: auto}
@@ -1904,6 +1977,7 @@ indicators:
     name: CBOE S&P 100 Volatility (VXO, 1986-2021)
     category: markets
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     discontinued: true
     frequency: d
     publication_lag_days: 1
@@ -1916,6 +1990,7 @@ indicators:
     name: Implied Volatility (VXO to 1990, VIX after)
     category: markets
     source: derived
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     derive: splice
     inputs: [VXOCLS, VIXCLS]
     derive_params: {switch_date: "1990-01-02", offset: auto}
@@ -1933,6 +2008,7 @@ indicators:
     name: Economic Policy Uncertainty, Historical News Index
     category: markets
     source: fred
+    modeled: false   # Stage-3 batch failed the acceptance rule (docs/v2_plan.md); panel/composite input only
     frequency: m
     publication_lag_days: 3
     vintage: false
