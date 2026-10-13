@@ -250,8 +250,15 @@ footer{margin-top:52px;padding-top:16px;border-top:1px solid var(--grid);color:v
         values and actual release dates where vintages exist; configured publication lags otherwise.
         Residual revision bias is disclosed, not hidden. Today's inputs use latest revised data —
         correct for today's forecaster.</p>
-        <p><strong>Uncertainty.</strong> With ~8 recessions of usable history, read ranges, not
-        decimals: the band is a lower bound on true uncertainty.</p>
+        <p><strong>Uncertainty.</strong> The band is a 10–90% range from a 3-year moving-block
+        bootstrap that refits every served ensemble member and scores it through the production
+        calibrators. With ~8 recessions of usable history, read ranges, not decimals: the band is a
+        lower bound on true uncertainty.</p>
+        <p><strong>What the model sees.</strong> The pipeline carries 143 series; the models use the
+        117 features that passed a pre-registered out-of-sample rule (the v1 set under the v2
+        correctness fixes, plus six breadth composites). The remaining series are shown in the data
+        table and feed the composites, but no model uses them individually — see
+        <code>docs/v2_plan.md</code> in the repository for every experiment and decision.</p>
       </div>
     </details>
   </section>
@@ -648,19 +655,22 @@ tiles.innerHTML = H.map(h=>{
    DATA.events.map(e=>`<tr><td>${e.onset}</td><td class="num">${(e.max_p_90d_before*100).toFixed(0)}%</td>`+
     `<td class="num">${(e.max_p_365d_before*100).toFixed(0)}%</td><td class="num">${e.lead_days??'—'}</td></tr>`).join('')+'</tbody>';
   const leads=DATA.events.filter(e=>e.lead_days!=null);
+  const thr=DATA.events.length&&DATA.events[0].detect_threshold!=null ? DATA.events[0].detect_threshold : 0.2;
+  const missed=DATA.events.filter(e=>e.lead_days==null).map(e=>e.onset.slice(0,4));
   document.getElementById('evsummary').textContent=
-   `${leads.length}/${DATA.events.length} recessions flagged (P ≥ 20% in the prior year), mean lead `+
+   `${leads.length}/${DATA.events.length} recessions flagged (P ≥ ${(thr*100).toFixed(0)}%, three times the base rate, in the prior year), mean lead `+
    `${leads.length?Math.round(leads.reduce((s,e)=>s+e.lead_days,0)/leads.length):0} days · `+
-   `false alarms (P ≥ 30% for ≥28d, no onset in 270d): ${DATA.false_alarms.length}. `+
-   `Misses — 1990 (hard in real time) and 2020 (exogenous shock) — are documented, not optimized away.`;
+   `false alarms (P ≥ ${(2*thr*100).toFixed(0)}% for ≥28d, no onset within a year): ${DATA.false_alarms.length}. `+
+   (missed.length ? `Missed: ${missed.join(', ')} — documented, not optimized away.` : `Every onset was flagged out of sample; 1990 and 2020 only barely (see the table).`);
 })();
 
 // ---- health ----
 (function(){
   const rows=DATA.health;
   const fresh=rows.filter(r=>r.status=='fresh').length;
+  const archived=rows.filter(r=>r.status=='archived').length;
   document.getElementById('healthline').innerHTML=
-   `${fresh}/${rows.length} sources fresh · ${DATA.refresh.n_vintage_series} series with first-release vintages · `+
+   `${fresh}/${rows.length-archived} live sources fresh${archived?` (+${archived} archived splice legs)`:''} · ${DATA.refresh.n_vintage_series} series with first-release vintages · `+
    `dataset <span class="mono">${DATA.refresh.dataset_version}</span> · fetch errors: ${DATA.refresh.n_fetch_errors}`;
   document.getElementById('htable').innerHTML=
    '<thead><tr>'+['Series','Category','Tier','Source','Vintage','Latest obs.','Days since obs.','Status']
