@@ -146,3 +146,34 @@ specs, 222 panel columns; 3380 weekly rows from 1962 as before):
   monotone directions when `hgb_monotone` is on.
 - The `invshare2y` transform referenced by the 10Y-3M entry did not exist
   and was added (share of the trailing two years spent inverted).
+
+## Stage 2 result (2026-10-13, v1 universe, reference `s1b_fixed`)
+
+Reference after the Stage-1 fixes: D Brier 0.0526, log loss 0.183, AUC
+0.822, 8 false-alarm episodes, every onset above 3x base rate in the prior
+year; 1-year Brier 0.116.
+
+| switch | Brier better (event folds) | log loss better | bootstrap share 90d | onsets below 3x base rate | pooled Brier | 1y Brier |
+|---|---|---|---|---|---|---|
+| `class_balance=0` | 4/5 | 3/5 | 99% | 2001 (0.06), 2020 (0.04) | 0.0304 | 0.0997 |
+| `hgb_monotone=1` | 2/5 | 2/5 | 91% | 1990 (0.03) | 0.0450 | 0.1193 |
+| `calibration=prior_oos` | 3/5 | 2/5 | 96% | 1990, 2001, 2020 | 0.0404 | 0.1086 |
+| `ensemble=A,B,C` | 1/5 | 1/5 | 0% | none | 0.0657 | 0.1159 |
+| prior_oos + monotone | 3/5 | 3/5 | 98% | 1990, 2020 | 0.0369 | 0.0933 |
+| natural + monotone + prior_oos | 3/5 | 4/5 | 91% | 1990, 2001, 2020 | 0.0396 | 0.0924 |
+| monotone + A,B,C | 3/5 | 3/5 | 23% | none | 0.0608 | 0.1193 |
+
+**Decision: no Stage-2 switch is adopted.** None satisfies criterion 1 (both
+proper scores better in 4 of the 5 event folds) and every variant that wins
+on pooled scores fails criterion 3 (an onset whose prior-year maximum sits
+below 3x the base rate). The defaults stay: class-balanced event weights,
+unconstrained boosting, inner-split calibration, B+C ensemble. Stage 3 runs
+under these defaults.
+
+Recorded for the next pre-registration, not acted on: the natural-weight
+variant beats the reference in 99% of block resamples at both horizons and
+cuts false alarms from 8 to 1, but criterion 3 compares absolute levels, so
+a class-balanced model that inflates every probability passes it more
+easily than a better-calibrated one. A future rule should state the
+detection guard in rank terms (e.g. the onset's prior-year maximum above the
+model's own 90th percentile) before any such comparison is run again.
