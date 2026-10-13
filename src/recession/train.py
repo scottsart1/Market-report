@@ -309,6 +309,15 @@ def write_model_card(bundle: dict, results: dict, cal) -> None:
         for f in m.get(prod, {}).get("per_fold", [])
     ]
     cov = bundle.get("vintage_coverage", {})
+    n_core, n_wide = bundle.get("n_core_features"), bundle.get("n_wide_features")
+    routing_note = (
+        f"{n_core} core features feed every member and the full set of {n_wide} reaches only the boosted model."
+        if n_core is not None and n_wide is not None and n_core != n_wide
+        else "every member sees the same feature set (no series is routed to the boosted model alone)."
+    )
+    thr = next((e.get("detect_threshold") for e in prod_events if e.get("detect_threshold") is not None), 0.2)
+    const = m.get("bl_constant", {}).get("pooled_cal", {})
+    prod_blk = m.get(prod, {}).get("pooled_cal", {})
     card = f"""# Model Card — U.S. Recession Probability Model v{bundle['model_version']}
 
 **Target.** Probability that the U.S. economy *enters* an NBER recession within
@@ -324,10 +333,7 @@ recession onsets. Recession events observed: {', '.join(str(o.date()) for o in c
 **Features.** {len(bundle['feature_cols'])} transformations across yield curve,
 monetary policy, credit, equity markets, labor, real activity, housing,
 consumer, inflation, business surveys, trade and breadth composites (see
-`config/indicators.yaml` and `docs/v2_series_notes.md`). The
-{bundle.get('n_core_features', len(bundle['feature_cols']))} core features feed every
-member; the full set of {bundle.get('n_wide_features', len(bundle['feature_cols']))}
-reaches only the monotone-constrained boosted model. Historical features are
+`config/indicators.yaml` and `docs/v2_series_notes.md`); {routing_note} Historical features are
 point-in-time: ALFRED first-release values where vintages exist
 ({cov.get('n_with_vintages', '?')} of {cov.get('n_series', '?')} downloaded series,
 median first vintage {cov.get('median_vintage_start', '?')}; earlier history and
@@ -357,6 +363,15 @@ recession event(s) in the calibration window).
 |---|---|---|---|---|---|
 {chr(10).join(_row(n) for n in ["A_yield_curve", "B_elastic_net", "C_grad_boost", "D_ensemble", "bl_constant", "bl_sahm", "bl_nfci"] if n in m)}
 
+**Against the constant baseline.** The unconditional base rate scores Brier
+{const.get('brier', float('nan')):.4f} and log loss {const.get('log_loss', float('nan')):.4f} on the same rows, against
+{prod_blk.get('brier', float('nan')):.4f} and {prod_blk.get('log_loss', float('nan')):.4f} for the production model: the
+model earns its keep through ranking (ROC AUC {prod_blk.get('roc_auc', float('nan')):.3f} vs {const.get('roc_auc', float('nan')):.3f}),
+detection and lead time, not through pooled proper scores, because the
+class-balanced members overstate probabilities in calm years (expected
+calibration error {prod_blk.get('ece', float('nan')):.4f} vs {const.get('ece', float('nan')):.4f}). Read the level with the band
+and the classification, not as a precise frequency.
+
 **1-year horizon.** A dedicated classifier (same architecture and validation,
 purge widened to 455 days) serves the 365-day probability; it is floored at
 P90 so the full horizon chain stays monotone. Out-of-sample (calibrated):
@@ -376,11 +391,11 @@ F5 and F7 contain no onset and price false alarms only.
 
 **Recession-by-recession (out-of-sample, production model)**
 
-| Onset | Max P90 in prior 90d | Lead days (first P>=0.20) |
+| Onset | Max P90 in prior 90d | Lead days (first P >= {thr:.2f}, three times the base rate) |
 |---|---|---|
 {chr(10).join(events_lines)}
 
-**False alarms** (sustained P90 >= 0.30 for 28+ days, no onset within 270d):
+**False alarms** (sustained P90 >= {2 * thr:.2f}, six times the base rate, for 28+ days, no onset within a year):
 {len(alarms)} episode(s) — {', '.join(f"{a['start']}..{a['end']} (max {a['max_p']:.2f})" for a in alarms) or 'none'}.
 
 **Uncertainty.** 10–90% band from {bundle.get('n_boot', 0)} three-year
