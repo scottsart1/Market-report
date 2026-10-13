@@ -45,6 +45,25 @@ def test_splice_switches_series_and_levels_the_overlap():
     assert list(s0["value"]) == [10, 11, 12, 13, 16, 17]
 
 
+def test_taylor_gap_signs():
+    n = 150
+    ffr = _frame(np.full(n, 5.0))
+    cpi = _frame(100 * (1.02 ** (np.arange(n) / 12)))        # 2% core inflation
+    un = _frame(np.r_[np.full(n - 1, 5.0), 4.0])             # last month: tight labor market
+    g = derive_series(_ind("taylor_gap", ["FEDFUNDS", "CPILFESL", "UNRATE"]), [ffr, cpi, un])
+    v = g.set_index("period")["value"]
+    # steady state: rule = 2 + 2 + 0 - 0 = 4, policy at 5 -> gap +1
+    assert np.isclose(v.iloc[-2], 1.0, atol=0.02)
+    # lower unemployment raises the rule rate, so the gap shrinks
+    assert v.iloc[-1] < v.iloc[-2]
+
+
+def test_dpeak_is_level_drop_from_trailing_peak():
+    v = pd.Series([1.0, 3.0, 2.0, 2.5, 1.0] + [1.0] * 20)
+    d = transform_values(v, "dpeak1y", "m")
+    assert d.iloc[4] == pytest.approx(-2.0) and d.iloc[1] == pytest.approx(0.0)
+
+
 def test_sahm_works_on_weekly_frequency():
     weeks = pd.date_range("2000-01-07", periods=80, freq="W-FRI")
     v = np.r_[np.full(60, 3.0), np.linspace(3.0, 4.0, 20)]

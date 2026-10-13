@@ -91,6 +91,11 @@ def transform_values(v: pd.Series, code: str, frequency: str) -> pd.Series:
         n = periods_for_months(f, 12 * int(m.group(1)))
         return v / _rolling(v, n, "max") - 1.0
 
+    m = re.fullmatch(r"dpeak(\d+)y", code)
+    if m:  # level drop from the trailing peak (for rates, where ratios misbehave near zero)
+        n = periods_for_months(f, 12 * int(m.group(1)))
+        return v - _rolling(v, n, "max")
+
     m = re.fullmatch(r"avg(\d+)m", code)
     if m:
         return _rolling(v, periods_for_months(f, int(m.group(1))), "mean")

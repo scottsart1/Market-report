@@ -138,6 +138,17 @@ def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
     elif ind.derive == "growth_gap":  # yoy growth of v0 minus yoy growth of v1, in points
         n = periods_for_months(ind.frequency, 12)
         value = 100.0 * ((a["v0"] / a["v0"].shift(n)) - (a["v1"] / a["v1"].shift(n)))
+    elif ind.derive == "taylor_gap":
+        # Policy rate minus a Taylor (1993) rule rate, inputs [FEDFUNDS, core CPI,
+        # UNRATE]. The unemployment gap uses the trailing 10-year mean rate as
+        # u*: a real-time stand-in for the CBO natural rate, whose history is
+        # re-estimated with hindsight. Positive = policy tighter than the rule.
+        n12 = periods_for_months(ind.frequency, 12)
+        n120 = periods_for_months(ind.frequency, 120)
+        pi = 100.0 * (a["v1"] / a["v1"].shift(n12) - 1.0)
+        ugap = a["v2"] - a["v2"].rolling(n120, min_periods=n120 // 2).mean()
+        rule = 2.0 + pi + 0.5 * (pi - 2.0) - 1.0 * ugap
+        value = a["v0"] - rule
     elif ind.derive == "splice":  # v0 before switch_date, v1 from it; optional level offset
         switch = pd.Timestamp(ind.derive_params["switch_date"])
         v0, v1 = a["v0"], a["v1"]
