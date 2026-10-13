@@ -23,7 +23,7 @@ from .backtest import (
 from .config import load_config
 from .horizon import HazardTermStructure
 from .labels import HORIZONS, build_recession_calendar, make_labels
-from .models import build_models, training_weights
+from .models import build_models, route_features, training_weights
 from .variants import active_variants, variant
 from .paths import MODELS_DIR, get_logger
 from .pipeline import build_panel, dataset_version, fetch_all, weekly_grid
@@ -130,7 +130,7 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
     y365_ser = labels[f"y{LONG_H}"]
     models_long, calibrators_long = {}, {}
     for name in ("B_elastic_net", "C_grad_boost"):
-        proto = build_models(feature_cols)[name]
+        proto = build_models(feature_cols, horizon=LONG_H)[name]
         if calib_mode == "prior_oos":
             w_full = training_weights(y365_ser.loc[long_idx].to_numpy(), labels.loc[long_idx, "next_onset"])
             models_long[name] = clone(proto).fit(Xw.loc[long_idx], y365_ser.loc[long_idx].to_numpy(), sample_weight=w_full)
@@ -155,12 +155,12 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
     if not fast:
         boot_models = fit_bootstrap_models(
             Xw.loc[rows90], y90_ser.loc[rows90].to_numpy(),
-            labels.loc[rows90, "next_onset"], feature_cols,
+            labels.loc[rows90, "next_onset"], route_features(feature_cols, 90)["core"],
             fixed_C=fitted["B_elastic_net"].C_,
         )
         boot_models_long = fit_bootstrap_models(
             Xw.loc[rows365], y365_ser.loc[rows365].to_numpy(),
-            labels.loc[rows365, "next_onset"], feature_cols,
+            labels.loc[rows365, "next_onset"], route_features(feature_cols, LONG_H)["core"],
             fixed_C=models_long["B_elastic_net"].C_,
         )
 

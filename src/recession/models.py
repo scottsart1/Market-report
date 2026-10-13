@@ -255,21 +255,39 @@ def risk_directions(feature_cols: list[str]) -> dict[str, int]:
     return {c: int(specs[c][1].risk) for c in feature_cols if c in specs}
 
 
-def build_models(feature_cols: list[str]) -> dict[str, BaseEstimator]:
+def route_features(feature_cols: list[str], horizon: int = 90) -> dict[str, list[str]]:
+    """Which columns each member sees (docs/v2_plan.md, Stage 3).
+
+    `wide`: every column tagged for the target horizon; `core`: the subset the
+    config routes to every member (indicator ``core: true``). The constrained
+    boosted model takes the wide set, the linear members and the bootstrap
+    the core set. Columns unknown to the config (tests) count as core. The
+    ``routing`` switch (default on) collapses both sets to `wide`.
+    """
+    specs = load_config().feature_specs()
+    wide = [c for c in feature_cols if c not in specs or horizon in specs[c][1].horizons]
+    if not variant("routing", True):
+        return {"core": wide, "wide": wide}
+    core = [c for c in wide if c not in specs or specs[c][0].core]
+    return {"core": core, "wide": wide}
+
+
+def build_models(feature_cols: list[str], horizon: int = 90) -> dict[str, BaseEstimator]:
     def _subset_or_constant(model_cls, wanted: list[str], **kw):
         cols = [c for c in wanted if c in feature_cols]
         # If a model's inputs are entirely unavailable, degrade to the
         # unconditional baseline instead of crashing the whole run.
         return model_cls(columns=cols, **kw) if cols else ConstantModel()
 
+    routed = route_features(feature_cols, horizon)
     # experiment switch (see recession/variants.py): constrain the boosted
     # model to the config's risk directions
-    monotone = risk_directions(feature_cols) if variant("hgb_monotone", False) else None
+    monotone = risk_directions(routed["wide"]) if variant("hgb_monotone", False) else None
 
     return {
         "A_yield_curve": _subset_or_constant(ProbitModel, YIELD_CURVE_COLS),
-        "B_elastic_net": ElasticNetLogit(columns=feature_cols),
-        "C_grad_boost": HGBModel(columns=feature_cols, monotone=monotone),
+        "B_elastic_net": ElasticNetLogit(columns=routed["core"]),
+        "C_grad_boost": HGBModel(columns=routed["wide"], monotone=monotone),
         "bl_constant": ConstantModel(),
         "bl_sahm": _subset_or_constant(ElasticNetLogit, SAHM_COLS, Cs=(0.3, 1.0)),
         "bl_nfci": _subset_or_constant(ElasticNetLogit, NFCI_COLS, Cs=(0.3, 1.0)),

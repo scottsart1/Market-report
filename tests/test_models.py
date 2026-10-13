@@ -44,3 +44,31 @@ def test_build_models_monotone_switch(monkeypatch):
     monkeypatch.setenv("RECESSION_VARIANTS", "hgb_monotone=1")
     mono = build_models(cols)["C_grad_boost"].monotone
     assert mono == {"SPREAD_10Y3M__level": -1, "ICSA_4WK__pct3m": 1}
+
+
+def test_feature_routing_by_core_flag_and_horizon(tmp_path, monkeypatch):
+    """Core features feed every member; wide-only ones reach the boosted
+    model; horizon tags drop a column from the other target's models."""
+    from recession import models as M
+    from recession.config import load_config
+    y = tmp_path / "c.yaml"
+    base = ("    category: rates\n    source: fred\n    frequency: d\n    publication_lag_days: 1\n"
+            "    vintage: false\n    tier: 1\n    license: public\n")
+    y.write_text(
+        "indicators:\n"
+        "  - id: CORE\n    name: c\n" + base + "    transforms: [{t: level, risk: 1, desc: core one}]\n"
+        "  - id: WIDE\n    name: w\n    core: false\n" + base +
+        "    transforms: [{t: level, risk: 1, desc: wide one}, {t: chg3m, risk: 1, desc: short only, horizons: [90]}]\n"
+    )
+    cfg = load_config(y)
+    monkeypatch.setattr(M, "load_config", lambda: cfg)
+    cols = ["CORE__level", "WIDE__level", "WIDE__chg3m", "UNKNOWN__x"]
+    r90 = M.route_features(cols, 90)
+    assert r90["core"] == ["CORE__level", "UNKNOWN__x"]
+    assert r90["wide"] == cols
+    r365 = M.route_features(cols, 365)
+    assert "WIDE__chg3m" not in r365["wide"] and r365["core"] == ["CORE__level", "UNKNOWN__x"]
+    ms = M.build_models(cols)
+    assert ms["B_elastic_net"].columns == r90["core"] and ms["C_grad_boost"].columns == cols
+    monkeypatch.setenv("RECESSION_VARIANTS", "routing=False")
+    assert M.route_features(cols, 90)["core"] == cols

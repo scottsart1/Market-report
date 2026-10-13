@@ -15,7 +15,7 @@ RAW_DIR = DATA_DIR / "raw"
 CACHE_DIR = DATA_DIR / "cache"
 PROCESSED_DIR = DATA_DIR / "processed"
 MODELS_DIR = PROJECT_ROOT / "models" / "trained"
-CONFIG_PATH = PROJECT_ROOT / "config" / "indicators.yaml"
+CONFIG_PATH = Path(os.environ.get("RECESSION_CONFIG", PROJECT_ROOT / "config" / "indicators.yaml"))
 HISTORY_DB = DATA_DIR / "history.sqlite"
 LOG_DIR = PROJECT_ROOT / "logs"
 

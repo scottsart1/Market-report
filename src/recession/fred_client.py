@@ -23,6 +23,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -69,6 +70,11 @@ def _throttle() -> None:
     _last_request_ts = time.time()
 
 
+def _redact(msg: object) -> str:
+    """Strip the API key from anything that may end up in a log line."""
+    return re.sub(r"api_key=[^&\s]+", "api_key=***", str(msg))
+
+
 def _request(url: str, params: dict, timeout: int = 75, delays: list[int] | None = None) -> requests.Response:
     """GET with retries, backoff and 429 handling."""
     if delays is None:
@@ -88,7 +94,7 @@ def _request(url: str, params: dict, timeout: int = 75, delays: list[int] | None
             return resp
         except requests.RequestException as exc:  # includes HTTPError
             last_exc = exc
-            log.warning("Request failed (attempt %d): %s", attempt + 1, exc)
+            log.warning("Request failed (attempt %d): %s", attempt + 1, _redact(exc))
     raise ConnectionError(f"FRED request failed after retries: {last_exc}")
 
 
@@ -349,15 +355,15 @@ def fetch_series(
             _write_cache(res)
             out[mode] = res
         except Exception as exc:
-            log.error("Fetch failed for %s/%s: %s", series_id, mode, exc)
+            log.error("Fetch failed for %s/%s: %s", series_id, mode, _redact(exc))
             if cached is not None:
-                cached.fetch_error = str(exc)
+                cached.fetch_error = _redact(exc)
                 out[mode] = cached
             else:
                 out[mode] = SeriesResult(
                     series_id, mode,
                     pd.DataFrame(columns=["period", "value", "avail"]),
-                    meta={}, fetch_error=str(exc),
+                    meta={}, fetch_error=_redact(exc),
                 )
 
     # If vintage was requested but no key is available, note the fallback.
@@ -428,9 +434,9 @@ def fetch_url_series(
     except Exception as exc:
         log.error("Fetch failed for %s (url): %s", series_id, exc)
         if cached is not None:
-            cached.fetch_error = str(exc)
+            cached.fetch_error = _redact(exc)
             return {"latest": cached}
         return {"latest": SeriesResult(
             series_id, "latest", pd.DataFrame(columns=["period", "value", "avail"]),
-            meta={}, fetch_error=str(exc),
+            meta={}, fetch_error=_redact(exc),
         )}

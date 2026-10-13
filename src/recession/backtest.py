@@ -482,7 +482,7 @@ def run_long_backtest(
     y = labels[f"y{LONG_H}"]
     el = labels["eligible_long"].astype(bool)
     folds = make_folds(X.index)
-    protos = {k: v for k, v in build_models(feature_cols).items()
+    protos = {k: v for k, v in build_models(feature_cols, horizon=LONG_H).items()
               if k in ("B_elastic_net", "C_grad_boost")}
 
     oos = labels[[f"y{LONG_H}", "eligible_long", "next_onset"]].copy()
