@@ -111,3 +111,38 @@ Bootstrap bands through all members and their calibrators (3-year blocks);
 model card with folds >= 2, leave-one-recession-out, per-fold first-release
 coverage and calibrator ranges; methodology text on the page; adversarial
 review of the diff for look-ahead before retraining and publishing.
+
+## Stage 3 implementation notes and look-ahead review (2026-10-13)
+
+What the full-universe build showed (143 enabled indicators, 225 feature
+specs, 222 panel columns; 3380 weekly rows from 1962 as before):
+
+- **Release timing verified against ALFRED.** For every series with
+  vintages the median first-release lag matches period end + configured lag
+  within a few days, including the negative lags: Philly Fed surveys
+  (-11, observed 17 days after month start), Empire State (-15, 14), Dallas
+  (-3/-2, 27) and the SLOOS family (-55, 34 days after quarter start).
+- **Composite coverage columns** (`<ID>__coverage`) are diagnostics and are
+  dropped before the panel, so the share of members present (which trends
+  up over time) never becomes a predictor.
+- **Splice `offset: auto`** measures the level step on the first four
+  overlapping observations, i.e. values from a few months after each switch
+  (1982, 1990, 1997, 2006). The step is a constant, so the only look-ahead
+  is that constant during those months; all switches predate the first
+  test fold's lessons by decades except the 2006 dollar splice.
+- **Chain-linking** of first-release levels uses the latest vintage to
+  locate rebasings; it changes the scale of the past, never its growth
+  rates, and a rebasing is an event announced when it happens.
+- **Model-based indices** (NFCI family, CFNAI, EBP, GZ) enter training from
+  their first real-time publication only; EBP and the GZ spread are
+  therefore 83-93% missing since 1968 and are routed to the boosted model
+  only (`core: false`), as are the Dallas Fed surveys (2004-).
+- **Discontinued splice legs** (CP3M, SUBLPDCLIWXWFRNQ, TWEXBMTH, VXOCLS)
+  are flagged `discontinued` so Data Health reports them as archived rather
+  than stale and the confidence grade ignores them.
+- **HGB regularisation** is unchanged (depth 3, 250 rounds at 0.05, leaves
+  of 40 weeks, L2 1.0, 70% feature subsampling, no early stopping so no
+  inner split is consulted); the wide set reaches it only under the config's
+  monotone directions when `hgb_monotone` is on.
+- The `invshare2y` transform referenced by the 10Y-3M entry did not exist
+  and was added (share of the trailing two years spent inverted).

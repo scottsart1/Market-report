@@ -23,7 +23,7 @@ from .backtest import (
 from .config import load_config
 from .horizon import HazardTermStructure
 from .labels import HORIZONS, build_recession_calendar, make_labels
-from .models import build_models, training_weights
+from .models import build_models, route_features, training_weights
 from .variants import active_variants, variant
 from .paths import MODELS_DIR, get_logger
 from .pipeline import build_panel, dataset_version, fetch_all, weekly_grid
@@ -63,6 +63,28 @@ def build_training_data(ttl_hours: float = 12.0, offline: bool = False):
     Xw = weekly_grid(panel_train)
     labels = make_labels(Xw.index, cal, HORIZONS)
     return cfg, fetched, cal, panel_train, Xw, labels
+
+
+def vintage_coverage(cfg, fetched) -> dict:
+    """How much of the training history rests on true first-release values:
+    per fetched series, whether ALFRED vintages were used and from when."""
+    rows = []
+    for ind in cfg.indicators:
+        if not ind.fetched or not ind.enabled:
+            continue
+        fr = fetched.get(ind.id, {}).get("first_release")
+        ok = fr is not None and fr.ok and fr.df is not None and len(fr.df)
+        rows.append({"id": ind.id, "vintage": bool(ok),
+                     "from": str(fr.df["period"].min().date()) if ok else None})
+    n = len(rows)
+    with_v = [r for r in rows if r["vintage"]]
+    starts = sorted(r["from"] for r in with_v)
+    return {
+        "n_series": n,
+        "n_with_vintages": len(with_v),
+        "median_vintage_start": starts[len(starts) // 2] if starts else None,
+        "without_vintages": [r["id"] for r in rows if not r["vintage"]],
+    }
 
 
 def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) -> dict:
@@ -166,6 +188,7 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         )
 
     train_medians = X_tr.median(numeric_only=True)
+    routed = route_features(feature_cols, 90)
 
     bundle = {
         "model_version": MODEL_VERSION,
@@ -201,6 +224,11 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
         ),
         "n_train_events": int(labels.loc[tr, "next_onset"][labels.loc[tr, "y90"] == 1].nunique()),
         "dataset_version": dataset_version(fetched),
+        "vintage_coverage": vintage_coverage(cfg, fetched),
+        "n_core_features": len(routed["core"]),
+        "n_wide_features": len(routed["wide"]),
+        "boot_members": served,
+        "n_boot": len(boot_models),
         "boot_models": boot_models,
         "boot_models_long": boot_models_long,
         "selection": bt.selection,
@@ -275,6 +303,12 @@ def write_model_card(bundle: dict, results: dict, cal) -> None:
         for e in prod_events
     ]
     alarms = results["false_alarms"].get(prod, [])
+    fold_lines = [
+        f"| {f['fold']} | {f['n']} | {f['n_pos']} | {f['brier']:.4f} | {f['log_loss']:.4f} | "
+        f"{f.get('roc_auc', float('nan')):.3f} | {f.get('recall@0.2', float('nan')):.2f} | {f.get('fpr@0.2', float('nan')):.2f} |"
+        for f in m.get(prod, {}).get("per_fold", [])
+    ]
+    cov = bundle.get("vintage_coverage", {})
     card = f"""# Model Card — U.S. Recession Probability Model v{bundle['model_version']}
 
 **Target.** Probability that the U.S. economy *enters* an NBER recession within
@@ -289,10 +323,19 @@ recession onsets. Recession events observed: {', '.join(str(o.date()) for o in c
 
 **Features.** {len(bundle['feature_cols'])} transformations across yield curve,
 monetary policy, credit, equity markets, labor, real activity, housing,
-consumer, inflation, and non-financial/high-frequency categories (see
-`config/indicators.yaml`). Historical features are point-in-time: ALFRED
-first-release values where vintages exist, and configured publication lags for
-release timing everywhere.
+consumer, inflation, business surveys, trade and breadth composites (see
+`config/indicators.yaml` and `docs/v2_series_notes.md`). The
+{bundle.get('n_core_features', len(bundle['feature_cols']))} core features feed every
+member; the full set of {bundle.get('n_wide_features', len(bundle['feature_cols']))}
+reaches only the monotone-constrained boosted model. Historical features are
+point-in-time: ALFRED first-release values where vintages exist
+({cov.get('n_with_vintages', '?')} of {cov.get('n_series', '?')} downloaded series,
+median first vintage {cov.get('median_vintage_start', '?')}; earlier history and
+the series without vintages — {', '.join(cov.get('without_vintages', [])) or 'none'} —
+use latest values), actual release dates for timing, chain-linked levels across
+index rebasings, and configured publication lags everywhere else. Model-based
+indices (NFCI, CFNAI, EBP) enter training only from their first real-time
+publication. Modeling switches in force: {bundle.get('variants') or 'defaults'}.
 
 **Methodology.** Base classifier for the 90-day onset window; probability
 calibration selected out-of-sample among none/Platt/smoothed isotonic
@@ -323,6 +366,14 @@ base rate {results['long_model']['metrics']['ensemble_1y']['base_rate']:.3f};
 {sum(e['detected'] for e in results['long_model']['events'])}/{len(results['long_model']['events'])}
 recessions reached P1y >= {results['long_model']['detect_threshold']:.2f} in the prior year.
 
+**Fold-by-fold (out-of-sample, production model).** Each recession since 1978
+is held out exactly once, so these are the leave-one-recession-out results;
+F5 and F7 contain no onset and price false alarms only.
+
+| Fold | Rows | Onset weeks | Brier | Log loss | ROC AUC | Recall@0.2 | FPR@0.2 |
+|---|---|---|---|---|---|---|---|
+{chr(10).join(fold_lines)}
+
 **Recession-by-recession (out-of-sample, production model)**
 
 | Onset | Max P90 in prior 90d | Lead days (first P>=0.20) |
@@ -331,6 +382,11 @@ recessions reached P1y >= {results['long_model']['detect_threshold']:.2f} in the
 
 **False alarms** (sustained P90 >= 0.30 for 28+ days, no onset within 270d):
 {len(alarms)} episode(s) — {', '.join(f"{a['start']}..{a['end']} (max {a['max_p']:.2f})" for a in alarms) or 'none'}.
+
+**Uncertainty.** 10–90% band from {bundle.get('n_boot', 0)} three-year
+moving-block bootstrap replicates; each replicate refits the served members
+({', '.join(bundle.get('boot_members', []))}) and is scored through the
+production calibrators. The band prices estimation uncertainty only.
 
 **Limitations.**
 - Only ~8 usable U.S. recessions exist; uncertainty bands (block bootstrap)
