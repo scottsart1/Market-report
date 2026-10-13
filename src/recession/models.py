@@ -16,6 +16,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+from .config import load_config
+from .variants import variant
+
 try:
     import statsmodels.api as sm
     HAS_STATSMODELS = True
@@ -142,11 +145,18 @@ class ElasticNetLogit(BaseEstimator, ClassifierMixin):
 
 
 class HGBModel(BaseEstimator, ClassifierMixin):
-    """Histogram gradient boosting (handles NaN natively, no extra deps)."""
+    """Histogram gradient boosting (handles NaN natively, no extra deps).
 
-    def __init__(self, columns: list[str], random_state: int = 0):
+    `monotone` maps feature name -> +1/-1: the fitted score may only rise
+    (fall) with that feature. With ~8 recessions this is a strong regularizer:
+    the trees cannot carve a 'risk falls when claims surge' region out of
+    one episode's noise.
+    """
+
+    def __init__(self, columns: list[str], random_state: int = 0, monotone: dict | None = None):
         self.columns = columns
         self.random_state = random_state
+        self.monotone = monotone
 
     def fit(self, X: pd.DataFrame, y, sample_weight=None):
         self.subset_ = FeatureSubset(self.columns)
@@ -155,11 +165,13 @@ class HGBModel(BaseEstimator, ClassifierMixin):
         # start later) carry no information and break HGB's binning.
         self.keep_ = ~np.all(np.isnan(Z), axis=0)
         Z = Z[:, self.keep_]
+        kept = [c for c, k in zip(self.columns, self.keep_) if k]
+        cst = [int(self.monotone.get(c, 0)) for c in kept] if self.monotone else None
         self.clf_ = HistGradientBoostingClassifier(
             max_depth=3, learning_rate=0.05, max_iter=250,
             min_samples_leaf=40, l2_regularization=1.0,
             max_features=0.7, random_state=self.random_state,
-            early_stopping=False,
+            early_stopping=False, monotonic_cst=cst,
         )
         self.clf_.fit(Z, np.asarray(y, dtype=int), sample_weight=sample_weight)
         self.classes_ = np.array([0, 1])
@@ -223,6 +235,12 @@ SAHM_COLS = ["SAHM_RT__level", "UNRATE__chg3m"]
 NFCI_COLS = ["NFCI__level", "NFCI__chg3m"]
 
 
+def risk_directions(feature_cols: list[str]) -> dict[str, int]:
+    """feature -> +1/-1 from the config's risk flags (0 for unknown features)."""
+    specs = load_config().feature_specs()
+    return {c: int(specs[c][1].risk) for c in feature_cols if c in specs}
+
+
 def build_models(feature_cols: list[str]) -> dict[str, BaseEstimator]:
     def _subset_or_constant(model_cls, wanted: list[str], **kw):
         cols = [c for c in wanted if c in feature_cols]
@@ -230,10 +248,14 @@ def build_models(feature_cols: list[str]) -> dict[str, BaseEstimator]:
         # unconditional baseline instead of crashing the whole run.
         return model_cls(columns=cols, **kw) if cols else ConstantModel()
 
+    # experiment switch (see recession/variants.py): constrain the boosted
+    # model to the config's risk directions
+    monotone = risk_directions(feature_cols) if variant("hgb_monotone", False) else None
+
     return {
         "A_yield_curve": _subset_or_constant(ProbitModel, YIELD_CURVE_COLS),
         "B_elastic_net": ElasticNetLogit(columns=feature_cols),
-        "C_grad_boost": HGBModel(columns=feature_cols),
+        "C_grad_boost": HGBModel(columns=feature_cols, monotone=monotone),
         "bl_constant": ConstantModel(),
         "bl_sahm": _subset_or_constant(ElasticNetLogit, SAHM_COLS, Cs=(0.3, 1.0)),
         "bl_nfci": _subset_or_constant(ElasticNetLogit, NFCI_COLS, Cs=(0.3, 1.0)),
