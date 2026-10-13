@@ -59,9 +59,10 @@ def test_taylor_gap_signs():
 
 
 def test_dpeak_is_level_drop_from_trailing_peak():
-    v = pd.Series([1.0, 3.0, 2.0, 2.5, 1.0] + [1.0] * 20)
-    d = transform_values(v, "dpeak1y", "m")
-    assert d.iloc[4] == pytest.approx(-2.0) and d.iloc[1] == pytest.approx(0.0)
+    v = pd.Series([1.0] * 8 + [3.0, 2.0, 2.5, 1.0] + [1.0] * 20)
+    d = transform_values(v, "dpeak1y", "m")  # 12-month window, 7-month warm-up
+    assert d.iloc[11] == pytest.approx(-2.0) and d.iloc[8] == pytest.approx(0.0)
+    assert d.iloc[22] == pytest.approx(0.0)  # every elevated value has left the window
 
 
 def test_sahm_works_on_weekly_frequency():
