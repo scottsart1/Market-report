@@ -29,7 +29,7 @@ from .paths import get_logger
 log = get_logger(__name__)
 
 BLOCK_WEEKS = 156   # 3-year blocks
-N_BOOT = 120
+N_BOOT = 60     # every replicate now refits two boosted models (~0.2 MB each): 60 keeps the bundle near 25 MB
 QUANTILES = (0.10, 0.90)
 
 
