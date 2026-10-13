@@ -79,6 +79,10 @@ class Indicator:
     replaces: str | None = None
     # a series that ended (kept as the early leg of a splice): never stale
     discontinued: bool = False
+    # modeled: false keeps the series in the panel (composite members, derive
+    # inputs, the indicator table) but out of every model's feature set —
+    # for batches that failed the pre-registered acceptance rule
+    modeled: bool = True
     # put ALFRED first-release levels on one base across rebasings (train mode)
     chain_link: bool = True
     # source == "composite": breadth measures computed on the as-of panel
@@ -122,6 +126,11 @@ class IndicatorConfig:
         return [name for name, (ind, t) in self.feature_specs().items()
                 if horizon in t.horizons and (ind.core or not core_only)]
 
+    def modeled_features(self, columns) -> list[str]:
+        """The subset of panel columns that models may use (`modeled: true`)."""
+        specs = self.feature_specs()
+        return [c for c in columns if c not in specs or specs[c][0].modeled]
+
 
 def _parse_transform(t: dict) -> TransformSpec:
     hz = t.get("horizons")
@@ -157,6 +166,7 @@ def _parse_indicator(d: dict) -> Indicator:
         core=bool(d.get("core", True)),
         replaces=d.get("replaces"),
         discontinued=bool(d.get("discontinued", False)),
+        modeled=bool(d.get("modeled", True)),
         chain_link=bool(d.get("chain_link", True)),
         composite_kind=d.get("kind") if d.get("source") == "composite" else None,
         members=tuple(d.get("members", []) or []),

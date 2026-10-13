@@ -53,6 +53,8 @@ def select_features(cfg, columns: list[str], args) -> list[str]:
         cat = ind.category if ind else ""
         if only is not None and iid not in only:
             continue
+        if ind is not None and not ind.modeled and only is None:
+            continue  # excluded by config unless named explicitly
         if iid in drop_ind or cat in drop_cat:
             continue
         if inc and not inc.search(c):

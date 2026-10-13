@@ -72,3 +72,18 @@ def test_feature_routing_by_core_flag_and_horizon(tmp_path, monkeypatch):
     assert ms["B_elastic_net"].columns == r90["core"] and ms["C_grad_boost"].columns == cols
     monkeypatch.setenv("RECESSION_VARIANTS", "routing=False")
     assert M.route_features(cols, 90)["core"] == cols
+
+
+def test_modeled_flag_keeps_series_in_panel_but_out_of_models(tmp_path):
+    from recession.config import load_config
+    y = tmp_path / "c.yaml"
+    base = ("    category: rates\n    source: fred\n    frequency: d\n    publication_lag_days: 1\n"
+            "    vintage: false\n    tier: 1\n    license: public\n")
+    y.write_text(
+        "indicators:\n"
+        "  - id: KEEP\n    name: k\n" + base + "    transforms: [{t: level, risk: 1, desc: kept one}]\n"
+        "  - id: PANEL\n    name: p\n    modeled: false\n" + base + "    transforms: [{t: level, risk: 1, desc: panel only}]\n"
+    )
+    cfg = load_config(y)
+    assert "PANEL__level" in cfg.feature_specs()                      # still built into the panel
+    assert cfg.modeled_features(["KEEP__level", "PANEL__level", "X"]) == ["KEEP__level", "X"]

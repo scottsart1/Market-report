@@ -89,7 +89,7 @@ def vintage_coverage(cfg, fetched) -> dict:
 
 def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) -> dict:
     cfg, fetched, cal, panel_train, Xw, labels = build_training_data(ttl_hours, offline)
-    feature_cols = [c for c in Xw.columns]
+    feature_cols = cfg.modeled_features(Xw.columns)
     log.info("Weekly training panel: %d rows x %d features", *Xw.shape)
 
     # ------------------------------------------------ walk-forward backtest
