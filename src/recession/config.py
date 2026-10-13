@@ -77,6 +77,12 @@ class Indicator:
     # the constrained boosted model (see docs/v2_plan.md)
     core: bool = True
     replaces: str | None = None
+    # put ALFRED first-release levels on one base across rebasings (train mode)
+    chain_link: bool = True
+    # source == "composite": breadth measures computed on the as-of panel
+    composite_kind: str | None = None   # breadth_pctile | rule_share | inv_share | zmean
+    members: tuple[str, ...] = ()       # feature names (ID__code)
+    rules: tuple[dict, ...] = ()        # rule_share: {feature, op, value}
 
     @property
     def fetched(self) -> bool:
@@ -148,7 +154,26 @@ def _parse_indicator(d: dict) -> Indicator:
         real_time_from=d.get("real_time_from"),
         core=bool(d.get("core", True)),
         replaces=d.get("replaces"),
+        chain_link=bool(d.get("chain_link", True)),
+        composite_kind=d.get("kind") if d.get("source") == "composite" else None,
+        members=tuple(d.get("members", []) or []),
+        rules=tuple(dict(r) for r in (d.get("rules", []) or [])),
     )
+
+
+def _parse_composite(d: dict) -> Indicator:
+    """A composite entry (top-level `composites:` list) is an indicator with
+    source 'composite', computed on the daily as-of panel."""
+    d = dict(d)
+    d.setdefault("source", "composite")
+    d.setdefault("frequency", "d")
+    d.setdefault("publication_lag_days", 0)
+    d.setdefault("vintage", False)
+    d.setdefault("tier", 1)
+    d.setdefault("license", "public")
+    d.setdefault("category", "composite")
+    d.setdefault("name", d["id"])
+    return _parse_indicator(d)
 
 
 @lru_cache(maxsize=4)
@@ -156,8 +181,9 @@ def load_config(path: str | Path = CONFIG_PATH) -> IndicatorConfig:
     with open(path) as f:
         raw = yaml.safe_load(f)
     inds = tuple(_parse_indicator(d) for d in raw["indicators"])
-    label_id = raw.get("labels", [{"id": "USREC"}])[0]["id"]
     composites = tuple(dict(c) for c in raw.get("composites", []) or [])
+    inds = inds + tuple(_parse_composite(c) for c in composites)
+    label_id = raw.get("labels", [{"id": "USREC"}])[0]["id"]
 
     ids = [i.id for i in inds]
     if len(ids) != len(set(ids)):
@@ -165,8 +191,15 @@ def load_config(path: str | Path = CONFIG_PATH) -> IndicatorConfig:
     for i in inds:
         if i.category not in CATEGORIES:
             raise ValueError(f"Unknown category {i.category!r} for {i.id}")
-        if i.source not in (*FETCHED_SOURCES, "derived"):
+        if i.source not in (*FETCHED_SOURCES, "derived", "composite"):
             raise ValueError(f"Unknown source {i.source!r} for {i.id}")
+        if i.source == "composite":
+            if i.composite_kind not in ("breadth_pctile", "rule_share", "inv_share", "zmean"):
+                raise ValueError(f"Composite {i.id}: unknown kind {i.composite_kind!r}")
+            if i.composite_kind == "rule_share" and not i.rules:
+                raise ValueError(f"Composite {i.id} needs rules")
+            if i.composite_kind != "rule_share" and not i.members:
+                raise ValueError(f"Composite {i.id} needs members")
         if i.source == "derived" and not i.inputs:
             raise ValueError(f"Derived indicator {i.id} needs inputs")
         if i.source == "url" and not (i.url and i.url_value_col):

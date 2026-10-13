@@ -147,6 +147,11 @@ def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
     elif ind.derive == "growth_gap":  # yoy growth of v0 minus yoy growth of v1, in points
         n = periods_for_months(ind.frequency, 12)
         value = 100.0 * ((a["v0"] / a["v0"].shift(n)) - (a["v1"] / a["v1"].shift(n)))
+    elif ind.derive == "ntfs":
+        # Near-term forward spread proxy (Engstrom-Sharpe): the 3-month rate
+        # implied ~18 months ahead minus the spot bill, from the 2y/1y/3m
+        # points: 2.25*DGS2 - 1.25*DGS1 - DTB3 (inputs in that order)
+        value = 2.25 * a["v0"] - 1.25 * a["v1"] - a["v2"]
     elif ind.derive == "taylor_gap":
         # Policy rate minus a Taylor (1993) rule rate, inputs [FEDFUNDS, core CPI,
         # UNRATE]. The unemployment gap uses the trailing 10-year mean rate as
@@ -176,6 +181,59 @@ def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
     return out.dropna(subset=["value"]).reset_index(drop=True)
 
 
+CHAIN_LINK_THRESHOLD = 0.10  # log change in first/latest ratio that marks a rebasing
+CHAIN_LINK_WINDOW = 6        # periods of ratio on each side used to confirm it
+
+
+def chain_link_first_release(first: pd.DataFrame, latest: pd.DataFrame) -> tuple[pd.DataFrame, list]:
+    """Put first-release levels on one base across index/unit changes.
+
+    ALFRED initial releases of an index series sit on whichever base year the
+    agency used at the time (industrial production: 1987=100, then 1992=100,
+    ...), so growth rates computed across a rebasing are nonsense (-66%
+    annualised in 1990). A rebasing shows up as a persistent shift in the
+    ratio first/latest, which is otherwise close to constant; it is detected
+    on medians of the ratio before and after each date (so one revised
+    observation is not a break) and every earlier value is scaled onto the
+    later base. The latest vintage is used only to locate and size the level
+    shift, never to supply values."""
+    if first.empty or latest.empty or (first["value"] <= 0).any():
+        return first, []
+    m = first[["period", "value"]].merge(
+        latest[["period", "value"]].rename(columns={"value": "latest"}), on="period", how="left"
+    )
+    r = np.log(m["value"] / m["latest"].where(m["latest"] > 0))
+    if r.notna().sum() < 4 * CHAIN_LINK_WINDOW:
+        return first, []
+    before = r.shift(1).rolling(CHAIN_LINK_WINDOW, min_periods=2).median()
+    after = r[::-1].rolling(CHAIN_LINK_WINDOW, min_periods=2).median()[::-1]
+    jump = (after - before)
+    # the row itself must already sit on the new base (otherwise the last
+    # pre-break row, whose forward window is mostly post-break, ties)
+    own = (r - before).abs() > CHAIN_LINK_THRESHOLD
+    cand = np.flatnonzero(((jump.abs() > CHAIN_LINK_THRESHOLD) & own).to_numpy())
+    # the shift is detected over a stretch of rows around the break: group
+    # neighbouring candidates and keep the row where the shift is largest
+    breaks: list[int] = []
+    cluster: list[int] = []
+    for i in cand:
+        if cluster and i - cluster[-1] > CHAIN_LINK_WINDOW:
+            breaks.append(int(max(cluster, key=lambda j: abs(jump.iloc[j]))))
+            cluster = []
+        cluster.append(int(i))
+    if cluster:
+        breaks.append(int(max(cluster, key=lambda j: abs(jump.iloc[j]))))
+    if not breaks:
+        return first, []
+    out = first.copy()
+    vals = out["value"].to_numpy(dtype=float).copy()
+    for i in breaks:  # chronological: earlier rows accumulate every later factor
+        factor = float(np.exp(jump.iloc[i]))
+        vals[:i] = vals[:i] * factor
+    out["value"] = vals
+    return out, [str(m["period"].iloc[i].date()) for i in breaks]
+
+
 def build_series_frames(
     cfg: IndicatorConfig,
     fetched: dict[str, dict[str, SeriesResult]],
@@ -203,6 +261,10 @@ def build_series_frames(
             # revision bias documented) before that date, true first releases
             # with actual publication dates after it.
             fr = res["first_release"].df
+            if ind.chain_link:
+                fr, breaks = chain_link_first_release(fr, res["latest"].df)
+                if breaks:
+                    log.info("%s: first-release levels chain-linked at %s", ind.id, ", ".join(breaks))
             older = res["latest"].df[res["latest"].df["period"] < fr["period"].min()]
             frame = (
                 pd.concat([older, fr], ignore_index=True)
@@ -268,6 +330,10 @@ def build_panel(
     specs = cfg.feature_specs()
     ages = {name: max_feature_age_days(specs[name][0]) for name in feats if name in specs}
     panel = build_feature_panel(feats, grid, max_age_days=ages)
+    if any(i.source == "composite" and i.enabled for i in cfg.indicators):
+        from .composites import composite_features  # local import: composites use features
+        comp = composite_features(panel, cfg)
+        panel = pd.concat([panel, comp.drop(columns=[c for c in comp.columns if c.endswith("__coverage")])], axis=1)
     panel.index.name = "date"
     return panel
 
