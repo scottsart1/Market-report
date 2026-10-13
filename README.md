@@ -59,6 +59,50 @@ dates.
 | Uncertainty | 3-year moving-block bootstrap refitting every served ensemble member, 10–90% band | ~8 recessions of history ⇒ ranges, not decimals |
 | Explanations | Feature-substitution attribution from the actual model + fixed plain-English templates from config | Never narrative-invented |
 
+## What changed in v2 (October 2026)
+
+Version 2.0.0 is the result of a pre-registered upgrade documented in
+`docs/v2_plan.md` (plan, acceptance rule, every experiment and decision) and
+`docs/v2_series_notes.md` (every series considered, with licence and
+real-time status).
+
+- **Correctness first.** Nine look-ahead and scaling defects found by three
+  independent audits were fixed before any experiment ran: the hazard
+  exponent had been fitted on the rows it was scored on (capping the served
+  90-day probability near 29%); transforms shifted by row count across data
+  gaps; shutdown-delayed releases were dated early; the senior loan officer
+  survey and regional Fed surveys were dated after, not before, their period
+  ends; single-event calibrators degenerated; the elastic-net penalty was
+  chosen on an unpurged tail; dead series were carried forward forever; and
+  the last year of provisional "no recession" labels was treated as settled.
+- **A wider universe, gated by a rule written in advance.** The data
+  pipeline grew from 60 to 143 series (fed funds and curve spreads, near-term
+  forward spread, real policy rate and Taylor gap, non-seasonally-adjusted
+  claims, insured unemployment, layoffs, regional Fed surveys with their
+  true release timing, commercial paper and loan-officer splices back to the
+  1960s-70s, the Fed's excess bond premium, housing breadth, trade, policy
+  uncertainty, and six breadth composites). Each pre-specified batch had to
+  beat the previous model on Brier score *and* log loss in at least four of
+  the five recession folds, win at least 80% of 52-week block-bootstrap
+  resamples, keep every onset above three times the base rate in the prior
+  year, and not hurt the 1-year model. Only the composites passed. The other
+  76 series stay in the pipeline (`modeled: false`): they are fetched, shown
+  in the indicator table and feed the composites, but no model uses them
+  individually. Modeling switches tested under the same rule (natural class
+  weights, monotone boosting, prior-fold calibration, a three-member
+  ensemble) were all rejected, several despite better pooled scores,
+  because the rule is what it is; the notes record what a future rule
+  should state differently.
+- **Uncertainty band.** The 10-90% band now comes from a 3-year
+  moving-block bootstrap that refits every served ensemble member, scored
+  through the production calibrators.
+- **Point-in-time plumbing.** Release dates from ALFRED are kept with every
+  first-release value, first-release levels are chain-linked across index
+  rebasings, model-based indices (NFCI, CFNAI, EBP) enter training only from
+  their first real-time publication, discontinued splice legs are marked as
+  archived rather than stale, and the history chart stitches the walk-forward
+  backtest to the live model at the training cutoff.
+
 ## Project layout
 
 ```
@@ -95,10 +139,11 @@ tests/                     leakage, labels, monotonicity, staleness, folds
 
 ## Data sources
 
-All series come from FRED/ALFRED (Federal Reserve Bank of St. Louis), most of
+All series come from FRED/ALFRED (Federal Reserve Bank of St. Louis) or
+public Federal Reserve research files (the excess bond premium), most of
 them U.S.-government public-domain series (Treasury yields, BLS labor data,
-Fed industrial production, Census housing, BEA income/consumption, NBER
-chronology). Licensing-restricted series (ICE BofA OAS, S&P 500) are optional
+Fed industrial production, Census housing, BEA income/consumption, regional
+Fed surveys, the senior loan officer survey, NBER chronology). Licensing-restricted series (ICE BofA OAS, S&P 500) are optional
 extras with public-domain substitutes (Moody's Baa/Aaa spreads, Nasdaq
 Composite for long-history equity behavior). Non-financial/high-frequency
 candidates include weekly claims, heavy-truck sales, vehicle miles traveled
