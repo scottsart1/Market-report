@@ -128,7 +128,33 @@ def transform_values(v: pd.Series, code: str, frequency: str) -> pd.Series:
         yoy = v / v.shift(n12) - 1.0
         return ann3 - yoy
 
+    m = re.fullmatch(r"hpgap(?:(\d+)k)?", code)
+    if m:  # one-sided HP gap: hpgap (standard lambda) or hpgap400k (BIS credit gap)
+        lam = int(m.group(1)) * 1000 if m.group(1) else _HP_LAMBDA[f]
+        return one_sided_hp_gap(v, lam, min_periods=periods_for_months(f, 120))
+
     raise ValueError(f"Unknown transform code: {code}")
+
+
+_HP_LAMBDA = {"q": 1600, "m": 129_600, "w": 1600 * 13 ** 4, "d": 1600 * 63 ** 4}
+
+
+def one_sided_hp_gap(v: pd.Series, lam: float, min_periods: int) -> pd.Series:
+    """Deviation from a Hodrick-Prescott trend fitted on the data up to each
+    date only (the 'real-time' gap of the credit-gap literature). The usual
+    two-sided filter would let the trend at t depend on t+1..T."""
+    from statsmodels.tsa.filters.hp_filter import hpfilter
+
+    x = v.to_numpy(dtype=float)
+    out = np.full(len(x), np.nan)
+    for t in range(len(x)):
+        seg = x[: t + 1]
+        if np.isnan(seg[-1]) or np.sum(~np.isnan(seg)) < min_periods:
+            continue
+        s = pd.Series(seg).interpolate(limit_direction="both")  # gaps inside the window only
+        cycle, _trend = hpfilter(s.to_numpy(), lamb=lam)
+        out[t] = cycle[-1]
+    return pd.Series(out, index=v.index)
 
 
 def transform_frame(df: pd.DataFrame, code: str, frequency: str) -> pd.DataFrame:

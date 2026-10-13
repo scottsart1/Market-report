@@ -15,6 +15,7 @@ import hashlib
 import json
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 
 from .config import FREQ_DAYS, Indicator, IndicatorConfig, load_config
@@ -96,8 +97,24 @@ def _align_inputs(frames: list[pd.DataFrame]) -> pd.DataFrame:
     return res.dropna(subset=["v0"]).reset_index(drop=True)
 
 
+def _align_union(frames: list[pd.DataFrame]) -> pd.DataFrame:
+    """Outer-join parents on period (same frequency); for a splice the
+    successor's periods must survive after the predecessor ends."""
+    out = None
+    for i, f in enumerate(frames):
+        g = (f.sort_values("period")
+             .rename(columns={"value": f"v{i}", "avail": f"a{i}"})[["period", f"v{i}", f"a{i}"]])
+        out = g if out is None else pd.merge(out, g, on="period", how="outer")
+    out = out.sort_values("period").reset_index(drop=True)
+    res = pd.DataFrame({"period": out["period"],
+                        "avail": out[[c for c in out.columns if c.startswith("a")]].max(axis=1)})
+    for c in [c for c in out.columns if c.startswith("v")]:
+        res[c] = out[c]
+    return res
+
+
 def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
-    a = _align_inputs(parents)
+    a = _align_union(parents) if ind.derive == "splice" else _align_inputs(parents)
     if ind.derive == "spread":
         value = a["v0"] - a["v1"]
     elif ind.derive == "curvature":  # mid yield minus average of wings
@@ -111,8 +128,24 @@ def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
     elif ind.derive == "avg4w":
         value = a["v0"].rolling(4, min_periods=2).mean()
     elif ind.derive == "sahm":  # 3m avg unemployment minus its 12m low
-        u3 = a["v0"].rolling(3, min_periods=3).mean()
-        value = u3 - u3.rolling(12, min_periods=6).min()
+        n3, n12 = periods_for_months(ind.frequency, 3), periods_for_months(ind.frequency, 12)
+        u3 = a["v0"].rolling(n3, min_periods=n3).mean()
+        value = u3 - u3.rolling(n12, min_periods=n12 // 2).min()
+    elif ind.derive == "ratio":  # v0 / v1 (optionally scaled)
+        value = a["v0"] / a["v1"].replace(0.0, np.nan) * float(ind.derive_params.get("scale", 1.0))
+    elif ind.derive == "flow_rate":  # 100 * flow(t) / stock(t-1), e.g. E->U flows over employment
+        value = 100.0 * a["v0"] / a["v1"].shift(1).replace(0.0, np.nan)
+    elif ind.derive == "growth_gap":  # yoy growth of v0 minus yoy growth of v1, in points
+        n = periods_for_months(ind.frequency, 12)
+        value = 100.0 * ((a["v0"] / a["v0"].shift(n)) - (a["v1"] / a["v1"].shift(n)))
+    elif ind.derive == "splice":  # v0 before switch_date, v1 from it; optional level offset
+        switch = pd.Timestamp(ind.derive_params["switch_date"])
+        v0, v1 = a["v0"], a["v1"]
+        offset = ind.derive_params.get("offset", 0.0)
+        if offset == "auto":  # mean difference over the overlap, so levels agree
+            both = v0.notna() & v1.notna()
+            offset = float((v1 - v0)[both].mean()) if both.any() else 0.0
+        value = pd.Series(np.where(a["period"] < switch, v0 + float(offset), v1), index=a.index)
     else:
         raise ValueError(f"Unknown derive recipe {ind.derive!r} for {ind.id}")
     out = pd.DataFrame({"period": a["period"], "value": value, "avail": a["avail"].cummax()})

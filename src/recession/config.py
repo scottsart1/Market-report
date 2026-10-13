@@ -1,7 +1,7 @@
 """Load and validate the indicator configuration."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
@@ -54,6 +54,7 @@ class Indicator:
     transforms: tuple[TransformSpec, ...] = ()
     derive: str | None = None
     inputs: tuple[str, ...] = ()
+    derive_params: dict = field(default_factory=dict)  # e.g. splice switch_date
     enabled: bool = True
     min_history_start: str | None = None
     # source == "url": a public CSV/XLSX file (e.g. a Fed research dataset)
@@ -110,6 +111,7 @@ def _parse_indicator(d: dict) -> Indicator:
         transforms=transforms,
         derive=d.get("derive"),
         inputs=tuple(d.get("inputs", []) or []),
+        derive_params=dict(d.get("derive_params", {}) or {}),
         enabled=bool(d.get("enabled", True)),
         min_history_start=d.get("min_history_start"),
         url=d.get("url"),
