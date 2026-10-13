@@ -23,8 +23,9 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+from scipy.optimize import minimize
+from scipy.special import expit
 from sklearn.isotonic import IsotonicRegression
-from sklearn.linear_model import LogisticRegression
 
 from .labels import HORIZONS
 
@@ -34,10 +35,24 @@ EPS = 1e-6
 # asserting the model has no ranking skill, which that window cannot
 # establish; such a fit is rejected in favor of the uncalibrated score.
 MIN_PLATT_SLOPE = 0.25
+# Prior weight pulling the Platt slope toward 1 (in log-likelihood units):
+# with one or two onsets in the window the slope is weakly identified, and
+# an unshrunk fit can quadruple or flatten the score's dispersion.
+PLATT_SLOPE_PRIOR = 5.0
+# A calibrator may only be applied where it was fitted: if more than this
+# share of the scores it is asked to map lie outside its fitted score range,
+# the fit says nothing about them and the raw score is served instead.
+MAX_OUT_OF_RANGE = 0.10
+CAL_FLOOR = 1e-4  # smallest calibrated probability a block may assert
 
 
 def _clip(p: np.ndarray) -> np.ndarray:
     return np.clip(np.asarray(p, dtype=float), EPS, 1 - EPS)
+
+
+def _logit(p: np.ndarray) -> np.ndarray:
+    p = _clip(p)
+    return np.log(p / (1 - p))
 
 
 class IdentityCalibrator:
@@ -52,23 +67,43 @@ class IdentityCalibrator:
     def is_informative(self) -> bool:
         return True
 
+    def covers(self, p) -> bool:
+        return True
+
 
 class PlattCalibrator:
-    """Sigmoid (Platt) calibration: logistic regression on the logit score."""
+    """Sigmoid (Platt) calibration on the logit score, slope shrunk toward 1.
+
+    Minimises the log loss plus PLATT_SLOPE_PRIOR * (slope - 1)^2, so the
+    intercept (the prior shift) is fitted freely while the slope moves away
+    from 1 only when the window carries evidence for it."""
 
     name = "platt"
 
     def fit(self, p, y):
-        z = np.log(_clip(p) / (1 - _clip(p))).reshape(-1, 1)
-        self.lr_ = LogisticRegression(C=1e6, max_iter=1000).fit(z, np.asarray(y, dtype=int))
+        z, yy = _logit(p), np.asarray(y, dtype=float)
+
+        def nll(ab):
+            q = _clip(expit(ab[0] * z + ab[1]))
+            return -np.sum(yy * np.log(q) + (1 - yy) * np.log(1 - q)) + PLATT_SLOPE_PRIOR * (ab[0] - 1.0) ** 2
+
+        res = minimize(nll, x0=np.array([1.0, 0.0]), method="BFGS")
+        self.slope_, self.intercept_ = float(res.x[0]), float(res.x[1])
+        self.fit_range_ = (float(z.min()), float(z.max()))
         return self
 
     def transform(self, p):
-        z = np.log(_clip(p) / (1 - _clip(p))).reshape(-1, 1)
-        return _clip(self.lr_.predict_proba(z)[:, 1])
+        return _clip(expit(self.slope_ * _logit(p) + self.intercept_))
 
     def is_informative(self) -> bool:
-        return float(self.lr_.coef_[0][0]) >= MIN_PLATT_SLOPE
+        return self.slope_ >= MIN_PLATT_SLOPE
+
+    def covers(self, p) -> bool:
+        # a sigmoid extrapolates sensibly, so only a gross mismatch is refused
+        z = _logit(p)
+        lo, hi = self.fit_range_
+        span = max(hi - lo, 1.0)
+        return float(np.mean((z < lo - span) | (z > hi + span))) <= MAX_OUT_OF_RANGE
 
 
 class SmoothIsotonicCalibrator:
@@ -91,16 +126,31 @@ class SmoothIsotonicCalibrator:
         ).fit(x, np.asarray(y, dtype=float))
         blocks = pd.DataFrame({"x": x, "v": iso.predict(x)}).groupby("v")["x"].mean()
         self.knots_x_ = blocks.to_numpy()
-        self.knots_y_ = blocks.index.to_numpy()
+        # a block with no positives is "very unlikely", not impossible
+        self.knots_y_ = np.clip(blocks.index.to_numpy(), CAL_FLOOR, 1 - CAL_FLOOR)
         order = np.argsort(self.knots_x_)
         self.knots_x_, self.knots_y_ = self.knots_x_[order], self.knots_y_[order]
         return self
 
     def transform(self, p):
-        return _clip(np.interp(_clip(p), self.knots_x_, self.knots_y_))
+        """Interpolate between knots; outside them extrapolate linearly toward
+        (0, 0) and (1, 1) instead of clamping, so scores beyond the fitted
+        range keep their ranking (the clamp once mapped a whole test fold to
+        a constant)."""
+        x = _clip(p)
+        kx, ky = self.knots_x_, self.knots_y_
+        out = np.interp(x, kx, ky)
+        out = np.where(x < kx[0], ky[0] * x / kx[0], out)
+        out = np.where(x > kx[-1], ky[-1] + (1 - ky[-1]) * (x - kx[-1]) / (1 - kx[-1]), out)
+        return _clip(out)
 
     def is_informative(self) -> bool:
-        return len(self.knots_y_) >= 2
+        # at least two distinct levels, and a range that is not a hairline
+        return len(self.knots_y_) >= 2 and (self.knots_y_[-1] - self.knots_y_[0]) >= 0.02
+
+    def covers(self, p) -> bool:
+        x = _clip(p)
+        return float(np.mean((x < self.knots_x_[0]) | (x > self.knots_x_[-1]))) <= MAX_OUT_OF_RANGE
 
 
 CALIBRATORS = {
@@ -126,24 +176,31 @@ class HazardTermStructure:
         self.theta_ = {h: h / base_h for h in horizons}
 
     def fit(self, p_base: np.ndarray, labels: pd.DataFrame) -> "HazardTermStructure":
-        """MLE of theta_h per horizon on out-of-sample predictions, then PAV
-        across horizons. labels must contain y{h} columns aligned to p_base."""
+        """MLE of theta_h for the sub-horizons on out-of-sample predictions,
+        then PAV across horizons. The base horizon's exponent is 1 by
+        construction: the served P90 IS the calibrated probability. (A fitted
+        theta_90 silently re-calibrated the headline number, and did so on the
+        rows it was then scored on.) labels must contain y{h} columns aligned
+        to p_base."""
         p = _clip(p_base)
         thetas, hs = [], []
         for h in self.horizons:
+            if h == self.base_h:
+                thetas.append(1.0)
+                hs.append(h)
+                continue
             y = labels[f"y{h}"].to_numpy()
             default = h / self.base_h
-            grid = np.unique(np.concatenate([
-                np.linspace(0.2, 2.5, 40) * default, [default, 1.0]
-            ]))
-            grid = grid[(grid > 0.01) & (grid <= 3.0)]
+            grid = np.unique(np.concatenate([np.linspace(0.2, 2.5, 40) * default, [default]]))
+            grid = grid[(grid > 0.01) & (grid <= 1.0)]  # a sub-horizon cannot exceed the base
             losses = [log_loss_w(y, 1 - (1 - p) ** th) for th in grid]
             thetas.append(float(grid[int(np.argmin(losses))]))
             hs.append(h)
         # pool-adjacent-violators: thetas must be nondecreasing in horizon
         iso = IsotonicRegression(increasing=True).fit(hs, thetas)
-        fitted = iso.predict(hs)
+        fitted = np.minimum(iso.predict(hs), 1.0)
         self.theta_ = {h: float(t) for h, t in zip(hs, fitted)}
+        self.theta_[self.base_h] = 1.0
         return self
 
     def term_structure(self, p_base) -> dict[int, np.ndarray]:

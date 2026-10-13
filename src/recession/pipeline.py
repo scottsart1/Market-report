@@ -19,13 +19,22 @@ import numpy as np
 import pandas as pd
 
 from .config import FREQ_DAYS, Indicator, IndicatorConfig, load_config
-from .features import build_feature_panel, periods_for_months, transform_frame
+from .features import build_feature_panel, periods_for_months, regularize_frame, transform_frame
 from .fred_client import SeriesResult, fetch_series, fetch_url_series, period_end
 from .paths import get_logger
 
 log = get_logger(__name__)
 
 GRID_START = "1962-01-01"
+SPLICE_OVERLAP_OBS = 4  # observations used to level a splice at the switch
+# A feature whose latest period started more than this long ago is missing,
+# not "unchanged": k periods of the native frequency plus the publication lag.
+STALE_PERIODS = 5
+STALE_GRACE_DAYS = 14
+
+
+def max_feature_age_days(ind: Indicator) -> int:
+    return STALE_PERIODS * FREQ_DAYS[ind.frequency] + max(ind.publication_lag_days, 0) + STALE_GRACE_DAYS
 
 
 # ------------------------------------------------------------------ fetching
@@ -153,9 +162,13 @@ def derive_series(ind: Indicator, parents: list[pd.DataFrame]) -> pd.DataFrame:
         switch = pd.Timestamp(ind.derive_params["switch_date"])
         v0, v1 = a["v0"], a["v1"]
         offset = ind.derive_params.get("offset", 0.0)
-        if offset == "auto":  # mean difference over the overlap, so levels agree
-            both = v0.notna() & v1.notna()
-            offset = float((v1 - v0)[both].mean()) if both.any() else 0.0
+        if offset == "auto":
+            # level difference on the first overlapping observations only:
+            # the rows before the overlap receive a shift that was knowable
+            # at the start of the overlap, not one averaged over its future
+            both = (v0.notna() & v1.notna()).to_numpy()
+            k = min(int(both.sum()), SPLICE_OVERLAP_OBS)
+            offset = float((v1 - v0)[both].iloc[:k].mean()) if k else 0.0
         value = pd.Series(np.where(a["period"] < switch, v0 + float(offset), v1), index=a.index)
     else:
         raise ValueError(f"Unknown derive recipe {ind.derive!r} for {ind.id}")
@@ -191,13 +204,20 @@ def build_series_frames(
             # with actual publication dates after it.
             fr = res["first_release"].df
             older = res["latest"].df[res["latest"].df["period"] < fr["period"].min()]
-            frames[ind.id] = (
+            frame = (
                 pd.concat([older, fr], ignore_index=True)
                 .sort_values("period")
                 .reset_index(drop=True)
             )
         else:
-            frames[ind.id] = res["latest"].df.copy()
+            frame = res["latest"].df.copy()
+        frame = frame[["period", "value", "avail"]]
+        if mode == "train" and ind.real_time_from:
+            # A model-based index is re-estimated over its whole history: the
+            # values dated before its first publication were never observable
+            # in real time, so training never sees them.
+            frame = frame[frame["period"] >= pd.Timestamp(ind.real_time_from)]
+        frames[ind.id] = regularize_frame(frame, ind.frequency)
 
     for ind in cfg.indicators:
         if ind.source != "derived" or not ind.enabled:
@@ -245,7 +265,9 @@ def build_panel(
     frames, _ = build_series_frames(cfg, fetched, mode)
     feats = build_feature_frames(cfg, frames)
     grid = grid if grid is not None else business_day_grid()
-    panel = build_feature_panel(feats, grid)
+    specs = cfg.feature_specs()
+    ages = {name: max_feature_age_days(specs[name][0]) for name in feats if name in specs}
+    panel = build_feature_panel(feats, grid, max_age_days=ages)
     panel.index.name = "date"
     return panel
 
@@ -281,7 +303,7 @@ def data_health(
         if latest is not None and latest.ok:
             last_p = latest.df["period"].max()
             pe = period_end(pd.Series([last_p]), ind.frequency).iloc[0]
-            expected_gap = FREQ_DAYS[ind.frequency] + ind.publication_lag_days
+            expected_gap = FREQ_DAYS[ind.frequency] + max(ind.publication_lag_days, 0)
             days_stale = (now.normalize() - pe).days
             row.update({
                 "source": latest.meta.get("source_detail"),

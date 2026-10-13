@@ -12,6 +12,7 @@ from .paths import CONFIG_PATH
 CATEGORIES = [
     "rates", "policy", "credit", "markets", "labor",
     "real_activity", "housing", "consumer", "inflation", "alt_hf",
+    "survey", "fiscal", "trade", "global", "composite",
 ]
 
 CATEGORY_LABELS = {
@@ -25,9 +26,15 @@ CATEGORY_LABELS = {
     "consumer": "Consumer",
     "inflation": "Inflation",
     "alt_hf": "Alternative / High Frequency",
+    "survey": "Business Surveys",
+    "fiscal": "Fiscal",
+    "trade": "Trade & Dollar",
+    "global": "Global",
+    "composite": "Breadth Composites",
 }
 
 FREQ_DAYS = {"d": 1, "w": 7, "m": 31, "q": 92}
+ALL_HORIZON_TAGS = (90, 365)
 
 
 @dataclass(frozen=True)
@@ -35,6 +42,7 @@ class TransformSpec:
     code: str
     risk: int  # +1: higher value -> higher recession risk; -1: opposite
     desc: str
+    horizons: tuple[int, ...] = ALL_HORIZON_TAGS  # which target models use it
 
 
 FETCHED_SOURCES = ("fred", "url")  # sources that are downloaded (vs derived)
@@ -62,6 +70,13 @@ class Indicator:
     url_date_col: str = "date"
     url_value_col: str | None = None
     url_sheet: str | None = None
+    # first real publication of a re-estimated index: earlier values are
+    # backcasts and are masked in training
+    real_time_from: str | None = None
+    # feature set routing: core features feed every member; the rest only
+    # the constrained boosted model (see docs/v2_plan.md)
+    core: bool = True
+    replaces: str | None = None
 
     @property
     def fetched(self) -> bool:
@@ -75,6 +90,7 @@ class Indicator:
 class IndicatorConfig:
     indicators: tuple[Indicator, ...]
     label_series: str = "USREC"
+    composites: tuple[dict, ...] = ()  # breadth composites (see composites.py)
 
     def by_id(self) -> dict[str, Indicator]:
         return {i.id: i for i in self.indicators}
@@ -92,12 +108,23 @@ class IndicatorConfig:
                 out[f"{ind.id}__{t.code}"] = (ind, t)
         return out
 
+    def features_for(self, horizon: int, core_only: bool = False) -> list[str]:
+        """Feature names tagged for a target horizon (90 or 365), optionally
+        only those routed to every member."""
+        return [name for name, (ind, t) in self.feature_specs().items()
+                if horizon in t.horizons and (ind.core or not core_only)]
+
+
+def _parse_transform(t: dict) -> TransformSpec:
+    hz = t.get("horizons")
+    return TransformSpec(
+        code=t["t"], risk=int(t.get("risk", 1)), desc=t.get("desc", t["t"]),
+        horizons=tuple(int(h) for h in hz) if hz else ALL_HORIZON_TAGS,
+    )
+
 
 def _parse_indicator(d: dict) -> Indicator:
-    transforms = tuple(
-        TransformSpec(code=t["t"], risk=int(t.get("risk", 1)), desc=t.get("desc", t["t"]))
-        for t in d.get("transforms", []) or []
-    )
+    transforms = tuple(_parse_transform(t) for t in d.get("transforms", []) or [])
     return Indicator(
         id=d["id"],
         name=d["name"],
@@ -118,6 +145,9 @@ def _parse_indicator(d: dict) -> Indicator:
         url_date_col=d.get("url_date_col", "date"),
         url_value_col=d.get("url_value_col"),
         url_sheet=d.get("url_sheet"),
+        real_time_from=d.get("real_time_from"),
+        core=bool(d.get("core", True)),
+        replaces=d.get("replaces"),
     )
 
 
@@ -127,6 +157,7 @@ def load_config(path: str | Path = CONFIG_PATH) -> IndicatorConfig:
         raw = yaml.safe_load(f)
     inds = tuple(_parse_indicator(d) for d in raw["indicators"])
     label_id = raw.get("labels", [{"id": "USREC"}])[0]["id"]
+    composites = tuple(dict(c) for c in raw.get("composites", []) or [])
 
     ids = [i.id for i in inds]
     if len(ids) != len(set(ids)):
@@ -145,4 +176,7 @@ def load_config(path: str | Path = CONFIG_PATH) -> IndicatorConfig:
         # The recession label must never appear as a predictor input.
         if label_id in (i.id, *i.inputs):
             raise ValueError(f"Label series {label_id} may not be used as an indicator")
-    return IndicatorConfig(indicators=inds, label_series=label_id)
+        for t in i.transforms:
+            if not set(t.horizons) <= set(ALL_HORIZON_TAGS):
+                raise ValueError(f"{i.id}: horizons must be among {ALL_HORIZON_TAGS}")
+    return IndicatorConfig(indicators=inds, label_series=label_id, composites=composites)

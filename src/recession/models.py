@@ -105,11 +105,14 @@ def _logistic_pipeline(columns: list[str], C: float, l1_ratio: float = 0.5) -> P
 
 
 class ElasticNetLogit(BaseEstimator, ClassifierMixin):
-    """Elastic-net logistic regression with a small *time-ordered* inner
-    validation to choose C (last 20% of the training window — never future
-    data relative to the training set)."""
+    """Elastic-net logistic regression. C is fixed at 0.01 by default: the
+    former tail-split selection chose the grid floor in every fold and, when
+    offered smaller values, picked a model with no coefficients because a
+    one-onset validation tail rewards the most-shrunk fit. A grid of several
+    Cs still runs the time-ordered inner validation (last 20% of the window,
+    never future data)."""
 
-    def __init__(self, columns: list[str], Cs=(0.01, 0.03, 0.1, 0.3), l1_ratio: float = 0.5):
+    def __init__(self, columns: list[str], Cs=(0.01,), l1_ratio: float = 0.5):
         self.columns = columns
         self.Cs = Cs
         self.l1_ratio = l1_ratio

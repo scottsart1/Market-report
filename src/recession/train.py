@@ -108,7 +108,7 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
     # long-eligible rows (which end a year before the labeled edge)
     tr_long = (Xw.index >= TRAIN_START) & labels["eligible_long"].to_numpy()
     long_idx = Xw.index[tr_long]
-    fit_idx_l, cal_idx_l = inner_split(long_idx)
+    fit_idx_l, cal_idx_l = inner_split(long_idx, LONG_H)
     y365_ser = labels[f"y{LONG_H}"]
     models_long, calibrators_long = {}, {}
     for name in ("B_elastic_net", "C_grad_boost"):

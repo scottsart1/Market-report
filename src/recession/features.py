@@ -162,6 +162,38 @@ def one_sided_hp_gap(v: pd.Series, lam: float, min_periods: int) -> pd.Series:
     return pd.Series(out, index=v.index)
 
 
+_PERIOD_FREQ = {"m": "MS", "q": "QS"}
+_WEEKDAYS = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+
+
+def regularize_frame(df: pd.DataFrame, frequency: str) -> pd.DataFrame:
+    """Reindex a period/value/avail frame to its complete calendar grid.
+
+    Transforms shift by rows, so a row must be a calendar period: a missing
+    month (a shutdown, a quarterly stretch of a monthly series, a sparse
+    series) otherwise silently turns a 3-month change into a 4-month one.
+    Missing periods become NaN rows, which the transforms cannot see through
+    and which are dropped again afterwards. Business-daily series are left
+    as they are (their row logic is trading days by design)."""
+    if df.empty or frequency == "d":
+        return df
+    df = df.sort_values("period")
+    if frequency in ("m", "q"):
+        key = df["period"].dt.to_period("M" if frequency == "m" else "Q").dt.to_timestamp()
+        df = df.assign(period=key).drop_duplicates("period", keep="last")
+        grid = pd.date_range(key.min(), key.max(), freq=_PERIOD_FREQ[frequency])
+    else:  # weekly: anchor on the series' own weekday
+        dow = int(df["period"].dt.dayofweek.mode().iloc[0])
+        on_grid = df["period"].dt.dayofweek == dow
+        if on_grid.mean() < 0.98:  # irregular stamps: not a weekly grid
+            return df.reset_index(drop=True)
+        df = df[on_grid].drop_duplicates("period", keep="last")
+        grid = pd.date_range(df["period"].min(), df["period"].max(), freq=f"W-{_WEEKDAYS[dow]}")
+    out = df.set_index("period").reindex(grid)
+    out.index.name = "period"
+    return out.reset_index()
+
+
 def transform_frame(df: pd.DataFrame, code: str, frequency: str) -> pd.DataFrame:
     """Apply a transform to a period/value/avail frame, propagating availability."""
     df = df.sort_values("period").reset_index(drop=True)
@@ -172,28 +204,41 @@ def transform_frame(df: pd.DataFrame, code: str, frequency: str) -> pd.DataFrame
         # published; cummax guards against any non-monotone release dates.
         "avail": df["avail"].cummax(),
     })
-    return out.dropna(subset=["value"]).reset_index(drop=True)
+    return out.dropna(subset=["value", "avail"]).reset_index(drop=True)
 
 
-def as_of_series(df: pd.DataFrame, grid: pd.DatetimeIndex, value_col: str = "value") -> pd.Series:
+def as_of_series(
+    df: pd.DataFrame, grid: pd.DatetimeIndex, value_col: str = "value",
+    max_age_days: int | None = None,
+) -> pd.Series:
     """Backward as-of join: for each grid date, the last value whose
-    availability date is <= that grid date."""
+    availability date is <= that grid date. With `max_age_days`, a value
+    whose period started more than that many days before the grid date is
+    treated as missing (a dead or paused series degrades to NaN instead of
+    being carried forward forever)."""
     if df.empty:
         return pd.Series(np.nan, index=grid)
     d = df.sort_values(["avail", "period"]).reset_index(drop=True)
     merged = pd.merge_asof(
         pd.DataFrame({"t": grid}),
-        d.rename(columns={"avail": "t", value_col: "_v"})[["t", "_v"]],
+        d.rename(columns={"avail": "t", value_col: "_v", "period": "_p"})[["t", "_v", "_p"]],
         on="t",
         direction="backward",
         allow_exact_matches=True,
     )
-    return pd.Series(merged["_v"].to_numpy(), index=grid)
+    v = merged["_v"].to_numpy(dtype=float)
+    if max_age_days is not None:
+        age = (merged["t"] - merged["_p"]).dt.days.to_numpy()
+        v = np.where(np.isnan(age) | (age > max_age_days), np.nan, v)
+    return pd.Series(v, index=grid)
 
 
 def build_feature_panel(
-    feature_frames: dict[str, pd.DataFrame], grid: pd.DatetimeIndex
+    feature_frames: dict[str, pd.DataFrame], grid: pd.DatetimeIndex,
+    max_age_days: dict[str, int] | None = None,
 ) -> pd.DataFrame:
     """Materialize all feature frames onto a common calendar grid."""
-    cols = {name: as_of_series(df, grid) for name, df in feature_frames.items()}
+    max_age_days = max_age_days or {}
+    cols = {name: as_of_series(df, grid, max_age_days=max_age_days.get(name))
+            for name, df in feature_frames.items()}
     return pd.DataFrame(cols, index=grid)

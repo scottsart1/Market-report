@@ -43,7 +43,9 @@ TRAIN_START = pd.Timestamp("1968-06-01")
 EMBARGO_DAYS = 90          # gap between train end and test start
 HORIZON_DAYS = 90          # base label window
 INNER_CAL_FRAC = 0.25      # tail share of each training window used to calibrate
-MIN_CAL_POS = 5            # positives required to fit a calibrator
+MIN_CAL_POS = 5            # positive rows required to fit a calibrator
+MIN_CAL_EVENTS = 2         # distinct onsets required to fit any calibrator
+MIN_ISO_EVENTS = 3         # distinct onsets required for the isotonic one
 DETECT_THRESHOLD = 0.20    # "the model warned" level for event detection
 ALARM_THRESHOLD = 0.30
 ALARM_MIN_DAYS = 28
@@ -133,32 +135,46 @@ def make_folds(index: pd.DatetimeIndex) -> list[dict]:
     return folds
 
 
-def inner_split(train_idx: pd.DatetimeIndex) -> tuple[pd.DatetimeIndex, pd.DatetimeIndex]:
-    """Time-ordered fit/calibration split with a purge gap between them."""
+def inner_split(
+    train_idx: pd.DatetimeIndex, horizon_days: int = HORIZON_DAYS
+) -> tuple[pd.DatetimeIndex, pd.DatetimeIndex]:
+    """Time-ordered fit/calibration split with a purge gap between them. The
+    purge must cover the label window of the target being calibrated (the
+    1-year model needs 90 + 365 days, not the 90-day model's 180)."""
     n = len(train_idx)
     cut = int(n * (1 - INNER_CAL_FRAC))
     fit_idx = train_idx[:cut]
-    purge_until = fit_idx.max() + pd.Timedelta(days=EMBARGO_DAYS + HORIZON_DAYS)
+    purge_until = fit_idx.max() + pd.Timedelta(days=EMBARGO_DAYS + horizon_days)
     cal_idx = train_idx[train_idx > purge_until]
     return fit_idx, cal_idx
+
+
+def n_events(y: np.ndarray, next_onset: pd.Series) -> int:
+    """Distinct recession onsets among the positive rows."""
+    pos = np.asarray(y, dtype=int) == 1
+    return int(pd.Series(next_onset).astype("datetime64[ns]")[pos].nunique())
 
 
 def fit_fold_calibrators(
     proto, X, y90, labels, fit_idx, cal_idx
 ) -> tuple[object, dict[str, object]]:
     """Fit the inner model on the fit split and one calibrator per method on
-    the calibration split. Falls back to identity when positives are scarce;
-    a method whose fit carries no ranking information is omitted, so callers
-    fall back to identity for it."""
+    the calibration split. Falls back to identity when the window holds
+    fewer than MIN_CAL_EVENTS distinct onsets (one recession cannot establish
+    a probability scale); a method whose fit carries no ranking information
+    is omitted, so callers fall back to identity for it."""
     w_fit = training_weights(y90.loc[fit_idx].to_numpy(), labels.loc[fit_idx, "next_onset"])
     inner = clone(proto).fit(X.loc[fit_idx], y90.loc[fit_idx].to_numpy(), sample_weight=w_fit)
     cals: dict[str, object] = {"none": IdentityCalibrator()}
     y_cal = y90.loc[cal_idx].to_numpy()
-    if len(cal_idx) >= 30 and y_cal.sum() >= MIN_CAL_POS:
+    k_events = n_events(y_cal, labels.loc[cal_idx, "next_onset"]) if len(cal_idx) else 0
+    if len(cal_idx) >= 30 and y_cal.sum() >= MIN_CAL_POS and k_events >= MIN_CAL_EVENTS:
         p_cal_raw = inner.predict_proba(X.loc[cal_idx])[:, 1]
         for name, cls in CALIBRATORS.items():
             if name == "none":
                 continue
+            if name == "isotonic_smooth" and k_events < MIN_ISO_EVENTS:
+                continue  # a step function per onset is not a calibration
             try:
                 cal = cls().fit(p_cal_raw, y_cal)
             except Exception as exc:  # pragma: no cover
@@ -168,6 +184,8 @@ def fit_fold_calibrators(
                 cals[name] = cal
             else:
                 log.info("Calibrator %s rejected as uninformative on this split", name)
+    elif len(cal_idx):
+        log.info("Calibration window holds %d onset(s); serving raw scores", k_events)
     return inner, cals
 
 
@@ -209,6 +227,10 @@ def run_backtest(
             inner, cals = fit_fold_calibrators(proto, X, y90, labels, fit_idx, cal_idx)
             p_inner = inner.predict_proba(X[te_mask])[:, 1]
             for cname, cal in cals.items():
+                if not cal.covers(p_inner):
+                    log.info("Calibrator %s/%s skipped on %s: test scores lie outside its fitted range",
+                             mname, cname, f["name"])
+                    continue
                 col = f"p_{cname}_{mname}"
                 oos.loc[te_mask, col] = cal.transform(p_inner)
                 method_cols[(mname, cname)] = col
@@ -326,19 +348,39 @@ def run_backtest(
         ),
     }
 
-    # ---- hazard term structure fitted on clean calibrated OOS (folds >= 2) --
+    # ---- hazard term structure ----
+    # Production exponents: fitted on all calibrated OOS rows of folds >= 2
+    # (theta_90 = 1 by construction). The OOS p{h} columns and the horizon
+    # metrics use walk-forward exponents instead: fold k's sub-horizon
+    # exponents come from folds 2..k-1 only, and before any prior fold
+    # exists the constant-hazard default h/90 is used, so no horizon metric
+    # is scored on rows its exponent was fitted on.
     score_mask = el & (oos["fold"] >= 2)
     ts = HazardTermStructure().fit(
         oos.loc[score_mask, f"p_cal_{production}"].to_numpy(), oos.loc[score_mask]
     )
+    theta_walk_forward: dict[int, dict] = {}
     for h in HORIZONS:
-        oos[f"p{h}"] = ts.term_structure(oos[f"p_cal_{production}"].to_numpy())[h]
+        oos[f"p{h}"] = np.nan
+    for f in folds:
+        k = f["k"]
+        rows = oos["fold"] == k
+        prior = el & (oos["fold"] >= 2) & (oos["fold"] < k)
+        ts_k = HazardTermStructure()
+        if int(oos.loc[prior, "y90"].sum()) >= MIN_CAL_POS:
+            ts_k.fit(oos.loc[prior, f"p_cal_{production}"].to_numpy(), oos.loc[prior])
+        theta_walk_forward[k] = dict(ts_k.theta_)
+        curve = ts_k.term_structure(oos.loc[rows, f"p_cal_{production}"].to_numpy())
+        for h in HORIZONS:
+            oos.loc[rows, f"p{h}"] = curve[h]
 
     horizon_metrics = {}
     for h in HORIZONS:
         horizon_metrics[h] = metric_block(
             oos.loc[score_mask, f"y{h}"], oos.loc[score_mask, f"p{h}"]
         )
+    horizon_metrics["note"] = ("walk-forward exponents: fold k uses folds 2..k-1; "
+                               "constant hazard h/90 where none exist")
 
     # ---- reliability curve data ----
     reliability = {}
@@ -360,6 +402,7 @@ def run_backtest(
     drop = [c for c in oos.columns if c.startswith(method_prefixes)]
     oos = oos.drop(columns=drop)
 
+    selection["theta_walk_forward"] = theta_walk_forward
     return BacktestResult(
         oos=oos, metrics=metrics, calibrator_choice=calibrator_choice,
         selection=selection, theta=ts.theta_, events=events,
@@ -402,7 +445,7 @@ def run_long_backtest(
         if len(train_idx) < 100:
             continue
         oos.loc[te, "fold"] = f["k"]
-        fit_idx, cal_idx = inner_split(train_idx)
+        fit_idx, cal_idx = inner_split(train_idx, LONG_H)
         for mname, proto in protos.items():
             inner, cals = fit_fold_calibrators(proto, X, y, labels, fit_idx, cal_idx)
             p_inner = inner.predict_proba(X[te])[:, 1]

@@ -263,15 +263,17 @@ def _availability_from_release(
 
     ALFRED only tracks vintages from some start date per series; observations
     older than the first vintage all carry that first vintage date as their
-    realtime_start. Treat a release date far beyond the configured lag as
-    backfill and fall back to period_end + lag for the timing (values remain
-    earliest-vintage; residual revision bias documented).
+    realtime_start. A row is backfill only if it carries that first vintage
+    date AND describes a period well before it; it then falls back to
+    period_end + lag for the timing (values remain earliest-vintage; residual
+    revision bias documented). Any later row keeps its true release date,
+    however late: a release delayed by a shutdown was not public earlier.
     """
     pe = period_end(df["period"], frequency)
     lag_based = pe + pd.Timedelta(days=lag_days)
-    gap = (df["release_date"] - pe).dt.days
-    backfill_threshold = max(3 * lag_days, lag_days + 45)
-    is_backfill = gap > backfill_threshold
+    first_vintage = df["release_date"].min()
+    threshold = pd.Timedelta(days=max(lag_days + 45, 45))
+    is_backfill = (df["release_date"] == first_vintage) & (pe < first_vintage - threshold)
     avail = df["release_date"].where(~is_backfill, lag_based)
     # A release date can never precede the data it describes by more than the
     # period itself; guard against metadata glitches.
@@ -313,7 +315,8 @@ def fetch_series(
             if mode == "first_release":
                 df = _fetch_api_first_release(series_id, api_key)  # type: ignore[arg-type]
                 df["avail"] = _availability_from_release(df, frequency, lag_days)
-                df = df[["period", "value", "avail"]]
+                # release_date is kept so timing can be audited from the cache
+                df = df[["period", "value", "avail", "release_date"]]
                 source_detail = "alfred_first_release"
             else:
                 if api_key:

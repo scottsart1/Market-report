@@ -27,6 +27,10 @@ import pandas as pd
 HORIZONS = (15, 30, 45, 60, 90)   # served by the shared 90-day hazard
 LONG_HORIZON = 365                # served by a dedicated long-horizon classifier
 ALL_HORIZONS = HORIZONS + (LONG_HORIZON,)
+# "No recession" labels younger than this are FRED's running extension of
+# the chronology, not an NBER determination; rows whose label window ends
+# inside it are predicted but not trained or scored on.
+LABEL_MATURITY_DAYS = 365
 
 
 @dataclass
@@ -68,12 +72,16 @@ def make_labels(
     grid: pd.DatetimeIndex,
     cal: RecessionCalendar,
     horizons: tuple[int, ...] = HORIZONS,
+    maturity_days: int = LABEL_MATURITY_DAYS,
 ) -> pd.DataFrame:
     """Per-date targets y{h} plus eligibility masks.
 
     y{h}[t] = 1 iff a recession onset occurs in (t, t + h days].
-    eligible[t] = not currently in recession AND the h=max window is fully
-    inside the labeled period (immature labels are excluded from training).
+    eligible[t] = not currently in recession AND the h=max window ends at
+    least `maturity_days` before the end of the labeled period: the most
+    recent year of "no recession" is FRED's extension of the chronology,
+    not an NBER determination (peaks have been announced up to a year
+    late), so such rows are predicted but never trained or scored on.
     """
     onsets = pd.DatetimeIndex(cal.onsets)
     out = pd.DataFrame(index=grid)
@@ -89,10 +97,10 @@ def make_labels(
     in_rec = cal.in_recession(grid)
     out["in_recession"] = in_rec.to_numpy()
     hmax = max(horizons)
-    mature = (grid + pd.Timedelta(days=hmax)) <= cal.last_label_date
+    mature = (grid + pd.Timedelta(days=hmax + maturity_days)) <= cal.last_label_date
     out["eligible"] = (~in_rec.to_numpy()) & mature
     # the 1-year target needs a full year of labeled future to be observable
-    mature_long = (grid + pd.Timedelta(days=LONG_HORIZON)) <= cal.last_label_date
+    mature_long = (grid + pd.Timedelta(days=LONG_HORIZON + maturity_days)) <= cal.last_label_date
     out["eligible_long"] = (~in_rec.to_numpy()) & mature_long
     # onset id for event-aware weighting: which onset (if any) a positive
     # y{hmax} row is anticipating (the next onset after t)
