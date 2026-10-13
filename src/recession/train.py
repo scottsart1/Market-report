@@ -23,11 +23,11 @@ from .backtest import (
 from .config import load_config
 from .horizon import HazardTermStructure
 from .labels import HORIZONS, build_recession_calendar, make_labels
-from .models import build_models, route_features, training_weights
+from .models import build_models, training_weights
 from .variants import active_variants, variant
 from .paths import MODELS_DIR, get_logger
 from .pipeline import build_panel, dataset_version, fetch_all, weekly_grid
-from .uncertainty import fit_bootstrap_models
+from .uncertainty import fit_bootstrap_ensembles
 
 log = get_logger(__name__)
 
@@ -152,16 +152,17 @@ def train(fast: bool = False, ttl_hours: float = 12.0, offline: bool = False) ->
 
     # ------------------------------------------------ bootstrap uncertainty
     boot_models, boot_models_long = [], []
+    served = members if production == "D_ensemble" else [production]
     if not fast:
-        boot_models = fit_bootstrap_models(
-            Xw.loc[rows90], y90_ser.loc[rows90].to_numpy(),
-            labels.loc[rows90, "next_onset"], route_features(feature_cols, 90)["core"],
-            fixed_C=fitted["B_elastic_net"].C_,
+        # every served member refitted per replicate with its production
+        # hyperparameters (clone keeps columns, C, monotone constraints)
+        boot_models = fit_bootstrap_ensembles(
+            Xw.loc[rows90], y90_ser.loc[rows90].to_numpy(), labels.loc[rows90, "next_onset"],
+            {name: fitted[name] for name in served},
         )
-        boot_models_long = fit_bootstrap_models(
-            Xw.loc[rows365], y365_ser.loc[rows365].to_numpy(),
-            labels.loc[rows365, "next_onset"], route_features(feature_cols, LONG_H)["core"],
-            fixed_C=models_long["B_elastic_net"].C_,
+        boot_models_long = fit_bootstrap_ensembles(
+            Xw.loc[rows365], y365_ser.loc[rows365].to_numpy(), labels.loc[rows365, "next_onset"],
+            dict(models_long),
         )
 
     train_medians = X_tr.median(numeric_only=True)

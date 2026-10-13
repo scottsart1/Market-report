@@ -23,7 +23,7 @@ from .pipeline import (
     refresh_summary, weekly_grid,
 )
 from .train import BUNDLE_PATH
-from .uncertainty import anchored_band, bootstrap_band
+from .uncertainty import anchored_band, bootstrap_band, bootstrap_scores
 
 log = get_logger(__name__)
 
@@ -202,20 +202,16 @@ def run_prediction(ttl_hours: float = 6.0, offline: bool = False, save: bool = T
 
     # ------------------------------------------------------------ uncertainty
     prod = bundle["production_model"]
-    cal_b = bundle["calibrators"]["B_elastic_net"]
     band = bootstrap_band(
         bundle.get("boot_models", []), x_today,
-        calibrate_fn=cal_b.transform,
+        calibrators=bundle["calibrators"],
         term_structure_fn=ts.term_structure,
         point=p90_today,
     )
 
     # 1-year band from the dedicated long-horizon bootstrap
     if p_long_daily is not None and bundle.get("boot_models_long"):
-        cal_bl = bundle["calibrators_long"]["B_elastic_net"]
-        ps = cal_bl.transform(np.array(
-            [m.predict_proba(x_today)[0, 1] for m in bundle["boot_models_long"]]
-        ))
+        ps = bootstrap_scores(bundle["boot_models_long"], x_today, bundle["calibrators_long"])
         band[lh] = anchored_band(ps, probs[lh])
 
     # ------------------------------------------------------- categories/health

@@ -2,27 +2,33 @@
 
 With only ~8 recessions in the usable sample, point probabilities carry real
 parameter uncertainty. We resample the weekly training panel in contiguous
-2-year blocks (preserving serial dependence and whole recession episodes),
-refit the elastic-net model on each resample with fixed hyperparameters, and
-keep the fitted pipelines. At prediction time the spread of their calibrated
-probabilities at the current feature vector gives a 10th-90th percentile
-band, mapped through the hazard term structure for every horizon.
+3-year blocks (preserving serial dependence and whole recession episodes,
+including the slow build-up before an onset), refit every served ensemble
+member on each resample with the production hyperparameters, and keep the
+fitted models. At prediction time each replicate is scored exactly like
+production (members calibrated with the production calibrators, then
+averaged); the spread of those probabilities at the current feature vector
+gives a 10th-90th percentile band, mapped through the hazard term structure
+for every horizon.
 
-The band reflects estimation uncertainty of the interpretable model; it is
-an honest lower bound on total uncertainty (model-choice uncertainty comes
-on top), which the methodology page states explicitly.
+The band reflects estimation uncertainty of the served ensemble given its
+architecture and calibrators; it is an honest lower bound on total
+uncertainty (architecture and calibrator-choice uncertainty come on top),
+which the methodology page states explicitly.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
+from sklearn.base import clone
+
 from .models import ElasticNetLogit, training_weights
 from .paths import get_logger
 
 log = get_logger(__name__)
 
-BLOCK_WEEKS = 104
+BLOCK_WEEKS = 156   # 3-year blocks
 N_BOOT = 120
 QUANTILES = (0.10, 0.90)
 
@@ -31,6 +37,38 @@ def block_bootstrap_indices(n: int, block: int, rng: np.random.Generator) -> np.
     starts = rng.integers(0, max(n - block, 1), size=int(np.ceil(n / block)))
     idx = np.concatenate([np.arange(s, min(s + block, n)) for s in starts])[:n]
     return np.sort(idx)
+
+
+def fit_bootstrap_ensembles(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    next_onset: pd.Series,
+    protos: dict,
+    n_boot: int = N_BOOT,
+    seed: int = 42,
+) -> list[dict]:
+    """Refit every served member (`protos`: name -> fitted production model,
+    cloned with its hyperparameters) on `n_boot` block resamples. Returns one
+    {member: fitted model} dict per kept replicate."""
+    rng = np.random.default_rng(seed)
+    fitted: list[dict] = []
+    n = len(X)
+    for b in range(n_boot):
+        idx = block_bootstrap_indices(n, BLOCK_WEEKS, rng)
+        yb = y[idx]
+        if yb.sum() < 5 or yb.sum() == len(yb):
+            continue
+        Xb = X.iloc[idx]
+        wb = training_weights(yb, next_onset.iloc[idx])
+        rep = {}
+        try:
+            for name, proto in protos.items():
+                rep[name] = clone(proto).fit(Xb, yb, sample_weight=wb)
+            fitted.append(rep)
+        except Exception as exc:  # pragma: no cover
+            log.warning("Bootstrap fit %d failed: %s", b, exc)
+    log.info("Bootstrap: %d/%d replicates kept (%s)", len(fitted), n_boot, ", ".join(protos))
+    return fitted
 
 
 def fit_bootstrap_models(
@@ -42,24 +80,23 @@ def fit_bootstrap_models(
     n_boot: int = N_BOOT,
     seed: int = 42,
 ) -> list:
-    rng = np.random.default_rng(seed)
-    fitted = []
-    n = len(X)
-    for b in range(n_boot):
-        idx = block_bootstrap_indices(n, BLOCK_WEEKS, rng)
-        yb = y[idx]
-        if yb.sum() < 5 or yb.sum() == len(yb):
-            continue
-        Xb = X.iloc[idx]
-        wb = training_weights(yb, next_onset.iloc[idx])
-        m = ElasticNetLogit(columns=feature_cols, Cs=(fixed_C,))
-        try:
-            m.fit(Xb, yb, sample_weight=wb)
-            fitted.append(m)
-        except Exception as exc:  # pragma: no cover
-            log.warning("Bootstrap fit %d failed: %s", b, exc)
-    log.info("Bootstrap: %d/%d fits kept", len(fitted), n_boot)
-    return fitted
+    """Elastic-net-only bootstrap (pre-2.0 bundles)."""
+    reps = fit_bootstrap_ensembles(X, y, next_onset,
+                                   {"B_elastic_net": ElasticNetLogit(columns=feature_cols, Cs=(fixed_C,))},
+                                   n_boot=n_boot, seed=seed)
+    return [r["B_elastic_net"] for r in reps]
+
+
+def bootstrap_scores(replicates: list, x_row: pd.DataFrame, calibrators: dict) -> np.ndarray:
+    """Calibrated probability of each bootstrap replicate at `x_row`, scored
+    like production: every member through its own calibrator, then averaged.
+    Accepts the pre-2.0 list of elastic-net models (single member)."""
+    out = []
+    for rep in replicates:
+        members = rep if isinstance(rep, dict) else {"B_elastic_net": rep}
+        out.append(np.mean([calibrators[m].transform(np.array([model.predict_proba(x_row)[0, 1]]))[0]
+                            for m, model in members.items()]))
+    return np.asarray(out, dtype=float)
 
 
 def anchored_band(ps_cal: np.ndarray, point: float) -> tuple[float, float]:
@@ -76,17 +113,17 @@ def anchored_band(ps_cal: np.ndarray, point: float) -> tuple[float, float]:
 
 
 def bootstrap_band(
-    boot_models: list,
+    replicates: list,
     x_row: pd.DataFrame,
-    calibrate_fn,
+    calibrators: dict,
     term_structure_fn,
     point: float,
 ) -> dict[int, tuple[float, float]]:
     """10-90% band per horizon: anchored in base-probability space at `point`,
     then mapped through the (monotone) term structure to every horizon."""
-    if not boot_models:
+    if not replicates:
         return {}
-    ps_cal = calibrate_fn(np.array([m.predict_proba(x_row)[0, 1] for m in boot_models]))
+    ps_cal = bootstrap_scores(replicates, x_row, calibrators)
     lo, hi = anchored_band(ps_cal, point)
     ts_lo, ts_hi = term_structure_fn(np.array([lo])), term_structure_fn(np.array([hi]))
     return {h: (float(ts_lo[h][0]), float(ts_hi[h][0])) for h in ts_lo}
