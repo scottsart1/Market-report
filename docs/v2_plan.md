@@ -177,3 +177,20 @@ a class-balanced model that inflates every probability passes it more
 easily than a better-calibrated one. A future rule should state the
 detection guard in rank terms (e.g. the onset's prior-year maximum above the
 model's own 90th percentile) before any such comparison is run again.
+
+## Stage 3 result, round 1 (2026-10-13, reference `s3_ref`: the v1 series on the v2 config, 104 features)
+
+| run | features | Brier better (event folds) | log loss better | bootstrap share 90d / 365d | onsets below 3x base rate | pooled Brier | 1y Brier |
+|---|---|---|---|---|---|---|---|
+| + composites only | 117 | 5/5 | 5/5 | 100% / 98% | none | 0.0561 | 0.0961 |
+| + all new series, no composites | 210 | 5/5 | 4/5 | 98% / 87% | 2020 (0.065) | 0.0526 | 0.1131 |
+| + everything | 223 | 4/5 | 4/5 | 97% / 99% | 2020 (0.062) | 0.0521 | 0.0997 |
+
+**Composites adopted** (all four criteria met; the only change that
+improves every event fold on both proper scores and both horizons). The
+wide batches taken together improve pooled scores but push the 2020
+onset's prior-year maximum under the 3x guard, so they are not adopted as
+a block. Round 2 tests the pre-specified batches one at a time on top of
+the v1 series + composites (`s3_ref_comp`, 117 features): curve & policy
+(12 series), labor onset (12), surveys (12), credit (16),
+housing/consumer/activity/trade (24).
